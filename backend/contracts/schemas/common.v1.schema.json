@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eagent.dev/contracts/common.v1.json",
+  "title": "eAgent 共享定义 v1",
+  "description": "各契约引用的公共定义。修改本文件等价于修改所有引用方契约，遵循 contracts/README.md 的版本化规则。",
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_:-]{2,63}$",
+      "description": "带前缀的平台 ID，如 svc_/rel_/ins_/inv_/evt_/trc_/task_ + 随机串"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "内容摘要（SHA-256 hex）"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 时间戳（UTC）"
+    },
+    "errorCode": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+      "description": "平台错误码，取值见 from_nekiro/07-fail-closed-errors.md 错误码表"
+    },
+    "safeMessage": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "description": "固定安全文案：不含内部地址、堆栈、SQL、凭证等敏感信息"
+    },
+    "mimeType": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 255
+    }
+  }
+}

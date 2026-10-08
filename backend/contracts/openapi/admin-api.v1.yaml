@@ -1,0 +1,2806 @@
+openapi: 3.1.0
+info:
+  title: eAgent 管理面 REST API
+  version: "1.0.0"
+  description: |
+    管理台 REST（/api/v1/*）契约 v1（from_nekiro/01-contract-first.md P0-1）。
+
+    - 身份：请求头 `cap-user-name`（工号）；strict 模式另需 `X-Admin-Token`。
+    - 错误响应统一符合 Platform Error v1：`{code, message, traceId}`，
+      code 取值见 from_nekiro/07-fail-closed-errors.md 错误码表。
+    - 响应头 `X-Trace-Id` 为本次请求的 trace 标识（P0-3/P0-4 的血缘锚点）。
+servers:
+  - url: /
+security:
+  - capUser: []
+  - adminToken: []
+tags:
+  - name: services
+    description: A2A 服务注册（能力②）
+  - name: agents
+    description: Agent Team 目录/注册（能力③，原「总控 Agent」更名，内部标识 COMPOSITE 不变）
+  - name: standalone
+    description: 独立部署导出（standalone-deployment；card + KB 快照 + deploy_digest 三件套）
+  - name: permissions
+    description: 权限与可见性（§6）
+  - name: releases
+    description: 不可变 Release 与状态流转（P0-2）
+  - name: installations
+    description: 工作空间安装（P0-2）
+  - name: instances
+    description: 实例注册/心跳/租约（P1-2）
+  - name: traces
+    description: 调用血缘查询（P0-4）
+  - name: perf
+    description: 性能测试：数据集/压力/仿真（perf-test 01）
+  - name: gateway
+    description: Higress 网关配置控制面：profile/MCP 服务/路由/consumer/审计（higress-mcp-gateway，scope gateway:manage）
+  - name: eval
+    description: 评测集 / 人工标注 / 提示词优化闭环（能力④ Loop Engineer，local-debug/07）
+
+paths:
+  /api/v1/services:
+    get:
+      tags: [services]
+      operationId: listServices
+      parameters:
+        - name: scope
+          in: query
+          schema: { type: string, enum: [admin] }
+          description: 传 admin 取全集（治理面）；默认按用户可见集合过滤
+      responses:
+        "200":
+          description: 服务列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ServiceRegistration" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+    post:
+      tags: [services]
+      operationId: registerService
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterServiceRequest" }
+      responses:
+        "200":
+          description: 注册成功（含兼容性判定）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServiceRegistration" }
+        "400": { $ref: "#/components/responses/PlatformError" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "409": { $ref: "#/components/responses/PlatformError" }
+        "502": { $ref: "#/components/responses/PlatformError" }
+  /api/v1/services:probe:
+    post:
+      tags: [services]
+      operationId: probeService
+      description: 连接探测——拉取 Agent Card + 契约校验 + 兼容性判定，不落库；注册弹窗「测试连接」预览远端卡片用
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProbeServiceRequest" }
+      responses:
+        "200":
+          description: 探测成功（卡片摘要 + 兼容性）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProbeServiceResult" }
+        "400": { $ref: "#/components/responses/PlatformError" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "502": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/services/{serviceId}:
+    get:
+      tags: [services]
+      operationId: getService
+      parameters:
+        - $ref: "#/components/parameters/ServiceId"
+      responses:
+        "200":
+          description: 服务详情（含当前 Card 快照与健康观测）
+          content:
+            application/json:
+              schema:
+                type: object
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+    patch:
+      tags: [services]
+      operationId: updateService
+      description: |
+        按来源更新注册配置。A2A_REMOTE 支持 displayName/tags/agentCardUrl/authSecretRef；
+        HIAGENT 支持 displayName/description/baseUrl/appKey/skills/inputsSchema/connectionTest。
+        slug 和来源不可变，错误来源字段返回400。密钥缺省或AppKey留空保留原值；
+        clearCredential=true显式清除密钥（HIAGENT改用全局默认），不可同时填写新密钥。
+        HIAGENT保存前验证参数与blocking/streaming连通性，失败保留原配置，成功刷新名片。
+      parameters:
+        - $ref: "#/components/parameters/ServiceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                displayName: { type: string }
+                tags: { type: string }
+                agentCardUrl: { type: string }
+                authSecretRef: { type: object, additionalProperties: { type: string }, writeOnly: true }
+                description: { type: string }
+                baseUrl: { type: string, description: HIAGENT实例地址，空值改用全局默认 }
+                appKey: { type: string, writeOnly: true, description: 留空保留原实例凭证 }
+                skills: { type: array, items: { type: object } }
+                inputsSchema: { type: object }
+                connectionTest: { type: object }
+                clearCredential: { type: boolean, default: false }
+      responses:
+        "200":
+          description: 更新后的服务记录
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServiceRegistration" }
+        "400": { $ref: "#/components/responses/PlatformError" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+        "502": { $ref: "#/components/responses/PlatformError" }
+    delete:
+      tags: [services]
+      operationId: deleteService
+      description: 级联删除已注册服务（带 Slug 强防呆 + 策略拦截 + 总控解绑与运行时 remount）；HIAGENT 来源额外清理 side 表/会话映射/合成 Card Revision 并摘除 /a2a/{slug} 端点。A2A 与 HIAGENT 来源均可删除，不可恢复。confirm 参数必须为 slug
+      parameters:
+        - $ref: "#/components/parameters/ServiceId"
+        - name: confirm
+          in: query
+          required: true
+          schema: { type: string }
+          description: 必须与待删除服务的 slug 完全一致
+        - name: force
+          in: query
+          required: false
+          schema: { type: boolean, default: false }
+          description: 是否强制解除总控绑定（A2A 来源适用）
+      responses:
+        "200":
+          description: 删除结果（A2A：deleted/slug/cascade/remounted_masters；HIAGENT：含 endpoint_unmounted）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted: { type: string }
+                  slug: { type: string }
+                  cascade: { type: object }
+                  remounted_masters: { type: array, items: { type: string } }
+                  endpoint_unmounted: { type: boolean }
+        "400": { $ref: "#/components/responses/PlatformError" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "403": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+        "409": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/services/{serviceId}:refresh:
+    post:
+      tags: [services]
+      operationId: refreshService
+      description: 重新拉取 Agent Card 并按 agent-card.v0.2 契约校验（fail-closed）
+      parameters:
+        - $ref: "#/components/parameters/ServiceId"
+      responses:
+        "200":
+          description: 刷新后的服务记录
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServiceRegistration" }
+        "400": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+        "502": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/services/{serviceId}:enable:
+    post:
+      tags: [services]
+      operationId: enableService
+      parameters:
+        - $ref: "#/components/parameters/ServiceId"
+      responses:
+        "200":
+          description: 启用后的服务记录
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServiceRegistration" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/services/{serviceId}:disable:
+    post:
+      tags: [services]
+      operationId: disableService
+      parameters:
+        - $ref: "#/components/parameters/ServiceId"
+      responses:
+        "200":
+          description: 禁用后的服务记录
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServiceRegistration" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/services/{serviceId}/credentials:
+    put:
+      tags: [services]
+      operationId: updateServiceCredentials
+      description: |
+        更新服务级出站凭证 headers（intranet-a2a-stream-adapter）。
+        值 AES-GCM 加密落库（EAGENT_GATEWAY_MASTER_KEY），出站调用注入
+        （如内网对端的 apikey 头）；headers=null 表示清除；响应不回显密文。
+      parameters:
+        - $ref: "#/components/parameters/ServiceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateServiceCredentialsRequest" }
+      responses:
+        "200":
+          description: 更新后的服务记录（凭证只回显是否已配置）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServiceRegistration" }
+        "400": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/services/{serviceId}/configuration:
+    get:
+      tags: [services]
+      operationId: getServiceConfiguration
+      description: 管理表单回填配置，按sourceType返回对应注册字段；credentialConfigured仅标识实例凭证是否存在，凭证明文和密文均不回显。
+      parameters:
+        - $ref: "#/components/parameters/ServiceId"
+      responses:
+        "200":
+          description: 注册配置（A2A_REMOTE或HIAGENT，字段名与注册/更新请求一致）
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [serviceId, sourceType, slug, displayName, credentialConfigured]
+                properties:
+                  serviceId: { type: string }
+                  sourceType: { type: string, enum: [A2A_REMOTE, HIAGENT] }
+                  slug: { type: string }
+                  displayName: { type: string }
+                  agentCardUrl: { type: string }
+                  tags: { type: string }
+                  baseUrl: { type: string }
+                  description: { type: string }
+                  skills: { type: array, items: { type: object } }
+                  inputsSchema: { type: object }
+                  connectionTest: { type: object }
+                  credentialConfigured: { type: boolean }
+        "400": { $ref: "#/components/responses/PlatformError" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "403": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/agents:
+    get:
+      tags: [agents]
+      operationId: listAgents
+      responses:
+        "200":
+          description: 统一 Agent 目录（composite=Agent Team；remote=A2A_REMOTE/HIAGENT 注册，行带 sourceType）
+          content:
+            application/json:
+              schema:
+                type: object
+        "401": { $ref: "#/components/responses/PlatformError" }
+    post:
+      tags: [agents]
+      operationId: createMaster
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateMasterRequest" }
+      responses:
+        "200":
+          description: 创建的 Agent Team（sourceType=COMPOSITE）或 HIAGENT 注册
+          content:
+            application/json:
+              schema:
+                type: object
+        "400": { $ref: "#/components/responses/PlatformError" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "409": { $ref: "#/components/responses/PlatformError" }
+        "502": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/agents/{masterId}:
+    get:
+      tags: [agents]
+      operationId: getMaster
+      parameters:
+        - $ref: "#/components/parameters/MasterId"
+      responses:
+        "200":
+          description: Agent Team 详情（绑定/提示词/运行统计）
+          content:
+            application/json:
+              schema:
+                type: object
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/agents/{masterId}:test-run:
+    post:
+      tags: [agents]
+      operationId: testRunMaster
+      description: |
+        管理台单点试运行（scope agent:manage）：对该 Agent Team 发起一次真实调用，
+        走的是与 /a2a/{slug}/ 相同的 master_service.run_master，同样落
+        run_record 与 invocation_event，区别只在少了 A2A 协议外壳且默认不套
+        入站 framing。用于验证意图路由与答案质量，不是压测（压测见
+        /api/v1/perf/tests）。
+        响应中的 toolbox 是本次调用的工具箱快照，用于区分「工具没进工具箱」
+        （权限/发布链问题）与「工具在箱子里但模型没选」（提示词/描述问题）。
+      parameters:
+        - $ref: "#/components/parameters/MasterId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text:
+                  type: string
+                  minLength: 1
+                  maxLength: 8000
+                  description: 发给 Agent Team 的用户文本
+                contextId:
+                  type: string
+                  maxLength: 64
+                  description: |
+                    对话上下文。省略则每次新建（互不串扰）；传入上一次响应的
+                    contextId 即为多轮追问（含澄清握手的补充输入）。
+                asUser:
+                  type: string
+                  maxLength: 64
+                  description: |
+                    以该 cap-user-name 的身份解析可见服务；省略则用调用者本人。
+                    A2A 工具受可见性约束，知识库工具不受（绑定即授权）。
+                inboundFraming:
+                  type: boolean
+                  default: false
+                  description: |
+                    是否套用 A2A 入站「不可信远端」framing 前缀。默认 false
+                    （管理台是内部调用）；置 true 可复现真实远端调用的模型行为。
+      responses:
+        "200":
+          description: 运行结果 + 路由轨迹 + 工具箱快照
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [runId, status, output, routedServices, toolbox]
+                properties:
+                  runId: { type: string }
+                  status:
+                    type: string
+                    description: SUCCEEDED / FAILED / LIMIT_REACHED / REJECTED / CANCELED
+                  errorCode: { type: string, nullable: true }
+                  errorDetail: { type: string, nullable: true }
+                  output: { type: string }
+                  inputRequired:
+                    type: boolean
+                    description: 模型判定信息不足并已追问（R3 澄清握手）
+                  routedServices:
+                    type: array
+                    items: { type: string }
+                  toolCalls:
+                    type: array
+                    description: 逐次工具调用轨迹（已脱敏截断）
+                    items:
+                      type: object
+                      properties:
+                        tool: { type: string }
+                        state: { type: string }
+                        output: { type: string }
+                  elapsedMs: { type: integer }
+                  promptVersionId: { type: string, nullable: true }
+                  traceId: { type: string, nullable: true }
+                  contextId: { type: string }
+                  asUser: { type: string }
+                  toolbox:
+                    type: object
+                    description: 本次调用模型可用的工具集合
+                    properties:
+                      a2a:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            toolName: { type: string }
+                            toolDescription: { type: string }
+                            serviceSlug: { type: string }
+                            releaseId: { type: string }
+                            agentVersion: { type: string }
+                      kb:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            name: { type: string }
+                            description: { type: string }
+                      unavailable:
+                        type: object
+                        additionalProperties: { type: string }
+                        description: 已绑定但解析失败的工具 → 原因码
+        "400": { $ref: "#/components/responses/PlatformError" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "403": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/agents/{masterId}:export-standalone:
+    post:
+      tags: [agents, standalone]
+      operationId: exportStandalone
+      description: |
+        导出该 Agent Team 为独立部署包 tar.gz（standalone-deployment 01 §7，
+        scope agent:manage）。三件套联合锁定：响应头 X-Deploy-Digest /
+        X-Card-Digest / X-Snapshot-Hash / X-Image-Tag。一期边界 fail-closed：
+        含 A2A 子服务绑定 → 409；KB 绑定未 READY → 409；card.json 不含
+        api_key（部署方 env 注入）。
+      parameters:
+        - $ref: "#/components/parameters/MasterId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                imageTag:
+                  type: string
+                  description: 引擎镜像 tag（deploy_digest 分量，构建期烘焙）
+                  default: eagent-standalone:latest
+      responses:
+        "200":
+          description: |
+            部署包 tar.gz（card.json + kb_snapshot/ + Dockerfile.standalone +
+            deploy/standalone.yaml + .env.example + README.md）
+          content:
+            application/gzip:
+              schema:
+                type: string
+                format: binary
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "403": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+        "409": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/agents/{masterId}/standalone-exports:
+    get:
+      tags: [agents, standalone]
+      operationId: listStandaloneExports
+      description: 导出登记列表（产物与配置状态经 master/version/digest 关联可查）
+      parameters:
+        - $ref: "#/components/parameters/MasterId"
+      responses:
+        "200":
+          description: 导出登记（eag_standalone_export）
+          content:
+            application/json:
+              schema:
+                type: object
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "403": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/services/{serviceId}/canary:
+    post:
+      tags: [governance]
+      operationId: createCanary
+      description: |
+        DEV-11 开灰度：白名单用户恒走候选版，其余用户按 canary+工号 的
+        稳定哈希比例分组（同用户不漂移）；基线自动取默认解析链版本。
+        与流量策略互斥。阈值默认 max_error_rate=0.05 / min_samples=20。
+      parameters:
+        - $ref: "#/components/parameters/ServiceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [candidateReleaseId]
+              properties:
+                candidateReleaseId: { type: string }
+                whitelist:
+                  type: array
+                  items: { type: string }
+                ratio: { type: number, default: 0.1 }
+                thresholds: { type: object }
+      responses:
+        "200": { description: 灰度已创建 }
+        "400": { $ref: "#/components/responses/PlatformError" }
+        "409": { $ref: "#/components/responses/PlatformError" }
+    get:
+      tags: [governance]
+      operationId: getCanary
+      description: 灰度状态 + 候选/基线双组指标（真实调用账本聚合，无则 NONE）
+      parameters:
+        - $ref: "#/components/parameters/ServiceId"
+      responses:
+        "200": { description: 灰度与指标 }
+        "401": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/services/{serviceId}/canary:evaluate:
+    post:
+      tags: [governance]
+      operationId: evaluateCanary
+      description: |
+        阈值守护：候选样本 ≥ min_samples 且错误率超 max_error_rate 时
+        自动 ABORT（分组路由即刻失效）；达标返回 ELIGIBLE。
+      parameters:
+        - $ref: "#/components/parameters/ServiceId"
+      responses:
+        "200": { description: 守护判定 }
+        "404": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/services/{serviceId}/canary:promote:
+    post:
+      tags: [governance]
+      operationId: promoteCanary
+      description: 达标全量——比例改 1.0，全部流量走候选版（保持观察态）
+      parameters:
+        - $ref: "#/components/parameters/ServiceId"
+      responses:
+        "200": { description: 已全量 }
+        "404": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/services/{serviceId}/canary:abort:
+    post:
+      tags: [governance]
+      operationId: abortCanary
+      description: 人工紧急停止——分组路由即刻失效，恢复默认解析链
+      parameters:
+        - $ref: "#/components/parameters/ServiceId"
+      responses:
+        "200": { description: 已停止 }
+        "404": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/external-tools:
+    post:
+      tags: [external]
+      operationId: createExternalTool
+      description: |
+        DEV-05 注册外部服务只读工具。kind=kb_query（外部知识库问答，
+        统一 kb_search 语义+来源标注+不可信声明）/ rest（通用 REST，
+        声明式参数）/ hiagent（预留实现位，待官方文档，注册即拒）。
+        出站走 SSRF 守卫；headers AES-GCM 加密落库永不回显；工具随
+        Agent Team 工具箱装配（master_id 匹配或全局）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, name, description, endpoint]
+              properties:
+                kind: { type: string, enum: [kb_query, rest, hiagent] }
+                name: { type: string }
+                description: { type: string }
+                endpoint: { type: string }
+                method: { type: string, default: POST }
+                headers:
+                  type: object
+                  nullable: true
+                bodyTemplate: { type: string, nullable: true }
+                params:
+                  type: array
+                  nullable: true
+                  items: { type: object }
+                masterId: { type: string, nullable: true }
+      responses:
+        "201": { description: 已注册 }
+        "400": { $ref: "#/components/responses/PlatformError" }
+        "403": { $ref: "#/components/responses/PlatformError" }
+    get:
+      tags: [external]
+      operationId: listExternalTools
+      description: 外部工具列表（凭证列不出）
+      responses:
+        "200": { description: 工具列表 }
+
+  /api/v1/external-tools/{toolId}:
+    put:
+      tags: [external]
+      operationId: updateExternalTool
+      description: |
+        编辑外部工具（按需更新：只有请求里出现的字段才改）。name 与
+        kind 不可改；headers 出现即整体替换（重新加密），缺省 = 保持
+        原凭证（凭证永不回显，编辑表单不回填）。
+      parameters:
+        - name: toolId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                description: { type: string }
+                endpoint: { type: string }
+                method: { type: string }
+                headers:
+                  type: object
+                  nullable: true
+                bodyTemplate: { type: string, nullable: true }
+                params:
+                  type: array
+                  nullable: true
+                  items: { type: object }
+                masterId: { type: string, nullable: true }
+      responses:
+        "200": { description: 更新后的工具（凭证列不出） }
+        "400": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+    delete:
+      tags: [external]
+      operationId: deleteExternalTool
+      parameters:
+        - name: toolId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: 已删除 }
+        "404": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/external-tools/{toolId}:enable:
+    post:
+      tags: [external]
+      operationId: enableExternalTool
+      parameters:
+        - name: toolId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: 已启用 }
+
+  /api/v1/external-tools/{toolId}:disable:
+    post:
+      tags: [external]
+      operationId: disableExternalTool
+      parameters:
+        - name: toolId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: 已停用 }
+
+  /api/v1/efficiency/faqs:generate:
+    post:
+      tags: [efficiency]
+      operationId: generateFaqs
+      description: |
+        DEV-17 从真实运行记录挖高频问答对生成候选 FAQ。Q/A 逐字取自
+        SUCCEEDED 且走了 KB 工具的运行（redact 后落库，不生成改写）。
+      parameters:
+        - name: masterId
+          in: query
+          schema: { type: string, nullable: true }
+      responses:
+        "200":
+          description: 挖掘结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  clusters: { type: integer }
+                  created: { type: integer }
+        "403": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/efficiency/faqs:
+    get:
+      tags: [efficiency]
+      operationId: listFaqs
+      description: 候选 FAQ 列表（按频次倒序）
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, nullable: true }
+      responses:
+        "200": { description: FAQ 列表 }
+
+  /api/v1/efficiency/faqs/{faqId}:decide:
+    post:
+      tags: [efficiency]
+      operationId: decideFaq
+      description: |
+        审批候选 FAQ。approve 且带 kbId 时合成 Markdown 源走 KB 入库
+        规划（upload_source → planner），状态置 INGESTED。
+      parameters:
+        - name: faqId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approve]
+              properties:
+                approve: { type: boolean }
+                kbId: { type: string, nullable: true }
+      responses:
+        "200": { description: 审批结果 }
+        "404": { $ref: "#/components/responses/PlatformError" }
+        "409": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/efficiency/gaps:scan:
+    post:
+      tags: [efficiency]
+      operationId: scanGaps
+      description: 扫 KB 拒答（no_reliable_hit）聚类进知识缺口清单
+      parameters:
+        - name: masterId
+          in: query
+          schema: { type: string, nullable: true }
+      responses:
+        "200": { description: 扫描结果 }
+
+  /api/v1/efficiency/gaps:
+    get:
+      tags: [efficiency]
+      operationId: listGaps
+      description: 知识缺口清单（按命中次数倒序）
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, default: OPEN }
+      responses:
+        "200": { description: 缺口列表 }
+
+  /api/v1/efficiency/gaps/{gapId}:resolve:
+    post:
+      tags: [efficiency]
+      operationId: resolveGap
+      description: 知识补齐后人工关闭缺口
+      parameters:
+        - name: gapId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: 已关闭 }
+        "404": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/memory:
+    get:
+      tags: [memory]
+      operationId: listMemory
+      description: |
+        DEV-01 分层记忆条目（scope=user/agent/shared，TTL 过期惰性过滤）。
+        user 只允许查本人（cap-user-name 即 ownerId）；agent/shared 需
+        agent:manage。user 与 agent 条目在 Agent Team 运行时注入提示词摘要段。
+      parameters:
+        - name: scope
+          in: query
+          required: true
+          schema: { type: string, enum: [user, agent, shared] }
+        - name: ownerId
+          in: query
+          required: true
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50 }
+      responses:
+        "200": { description: 记忆列表 }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "403": { $ref: "#/components/responses/PlatformError" }
+    post:
+      tags: [memory]
+      operationId: addMemory
+      description: 新增记忆条目（脱敏后落库；user 只允许写本人）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scope, ownerId, content]
+              properties:
+                scope: { type: string, enum: [user, agent, shared] }
+                ownerId: { type: string }
+                content: { type: string }
+                ttlSeconds: { type: integer, nullable: true }
+                sourceTraceId: { type: string, nullable: true }
+      responses:
+        "201": { description: 已创建 }
+        "400": { $ref: "#/components/responses/PlatformError" }
+        "403": { $ref: "#/components/responses/PlatformError" }
+    delete:
+      tags: [memory]
+      operationId: clearMemory
+      description: 清除记忆条目（用户清自己 / agent:manage 清 agent 与 shared）
+      parameters:
+        - name: scope
+          in: query
+          required: true
+          schema: { type: string }
+        - name: ownerId
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: 已清除 }
+        "403": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/observability/remote-logs:
+    post:
+      tags: [observability]
+      operationId: ingestRemoteLogs
+      description: |
+        DEV-12 远程运行服务日志纳管。X-Internal-Token 与
+        EAGENT_REMOTE_LOG_TOKEN 匹配才可写入（fail-closed，未配置令牌 =
+        端点拒绝）；消息经模式化脱敏。MQ 消费者复用同一写入层。
+      parameters:
+        - name: X-Internal-Token
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [entries]
+              properties:
+                entries:
+                  type: array
+                  items:
+                    type: object
+                    required: [message]
+                    properties:
+                      serviceId: { type: string, nullable: true }
+                      level: { type: string, default: INFO }
+                      traceId: { type: string, nullable: true }
+                      runId: { type: string, nullable: true }
+                      message: { type: string }
+                      occurredAt: { type: string, nullable: true }
+      responses:
+        "200":
+          description: 写入结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  inserted: { type: integer }
+                  skipped: { type: integer }
+        "403": { $ref: "#/components/responses/PlatformError" }
+    get:
+      tags: [observability]
+      operationId: queryRemoteLogs
+      description: 检索已纳管的远程日志（按服务 / traceId）
+      parameters:
+        - name: serviceId
+          in: query
+          schema: { type: string }
+        - name: traceId
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 100 }
+      responses:
+        "200": { description: 日志列表 }
+        "401": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/observability/alerts:
+    get:
+      tags: [observability]
+      operationId: listAlerts
+      description: |
+        DEV-12 告警事件列表（FIRED 未关闭在前）。定时探测连续 N 次
+        不可达触发 SERVICE_DOWN（静默窗口防重复），恢复触发
+        SERVICE_RECOVERED；配置 EAGENT_ALERT_WEBHOOK_URL 时同步 webhook。
+      parameters:
+        - name: serviceId
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 100 }
+      responses:
+        "200": { description: 告警列表 }
+        "401": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/traffic-policies:
+    get:
+      tags: [governance]
+      operationId: listTrafficPolicies
+      description: DEV-10 生效中的多版本流量策略列表
+      responses:
+        "200":
+          description: 策略列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  policies:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        policy_id: { type: string }
+                        service_id: { type: string }
+                        entries:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              release_id: { type: string }
+                              weight: { type: integer }
+                        status: { type: string }
+                        created_by: { type: string }
+                        created_at: { type: string }
+        "401": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/services/{serviceId}/traffic-policy:
+    get:
+      tags: [governance]
+      operationId: getTrafficPolicy
+      description: 查询服务的生效流量策略（无则 status=NONE）
+      parameters:
+        - $ref: "#/components/parameters/ServiceId"
+      responses:
+        "200": { description: 策略或 NONE }
+        "401": { $ref: "#/components/responses/PlatformError" }
+    put:
+      tags: [governance]
+      operationId: setTrafficPolicy
+      description: |
+        设置多版本流量比例（整体替换）。权重合计必须 100、至少两个
+        PUBLISHED 版本且属于该服务；未 pin 绑定的调用按权重加权分流，
+        选中版本不可用时自动让位其余版本。操作记审计事件。
+      parameters:
+        - $ref: "#/components/parameters/ServiceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [entries]
+              properties:
+                entries:
+                  type: array
+                  items:
+                    type: object
+                    required: [releaseId, weight]
+                    properties:
+                      releaseId: { type: string }
+                      weight: { type: integer }
+      responses:
+        "200": { description: 生效的策略 }
+        "400": { $ref: "#/components/responses/PlatformError" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+    delete:
+      tags: [governance]
+      operationId: deleteTrafficPolicy
+      description: 一键回切——停用策略恢复默认解析链（审计留痕）
+      parameters:
+        - $ref: "#/components/parameters/ServiceId"
+      responses:
+        "200": { description: 已停用 }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/services/{serviceId}/releases:
+    get:
+      tags: [releases]
+      operationId: listReleases
+      parameters:
+        - $ref: "#/components/parameters/ServiceId"
+      responses:
+        "200":
+          description: Release 列表（不可变历史）
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AgentRelease" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+    post:
+      tags: [releases]
+      operationId: createRelease
+      description: 基于服务当前 Card Revision 创建 DRAFT Release
+      parameters:
+        - $ref: "#/components/parameters/ServiceId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                agentVersion: { type: string }
+      responses:
+        "200":
+          description: 创建的 DRAFT Release
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentRelease" }
+        "400": { $ref: "#/components/responses/PlatformError" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+        "409": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/releases/{releaseId}:publish:
+    post:
+      tags: [releases]
+      operationId: publishRelease
+      parameters:
+        - $ref: "#/components/parameters/ReleaseId"
+      responses:
+        "200":
+          description: 发布后的 Release
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentRelease" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+        "409": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/releases/{releaseId}:suspend:
+    post:
+      tags: [releases]
+      operationId: suspendRelease
+      parameters:
+        - $ref: "#/components/parameters/ReleaseId"
+      responses:
+        "200":
+          description: 暂停后的 Release
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentRelease" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+        "409": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/releases/{releaseId}:revoke:
+    post:
+      tags: [releases]
+      operationId: revokeRelease
+      parameters:
+        - $ref: "#/components/parameters/ReleaseId"
+      responses:
+        "200":
+          description: 撤销后的 Release（终态，保留历史）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentRelease" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+        "409": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/workspaces/{workspaceId}/installations:
+    get:
+      tags: [installations]
+      operationId: listInstallations
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 工作空间安装列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object }
+        "401": { $ref: "#/components/responses/PlatformError" }
+    post:
+      tags: [installations]
+      operationId: installRelease
+      description: 安装某个 PUBLISHED Release（幂等启用）
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [serviceId, releaseId]
+              properties:
+                serviceId: { type: string }
+                releaseId: { type: string }
+                acceptedPermissions:
+                  type: [array, "null"]
+                  items: { type: string }
+      responses:
+        "200":
+          description: 安装记录
+          content:
+            application/json:
+              schema: { type: object }
+        "400": { $ref: "#/components/responses/PlatformError" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+        "409": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/installations/{installationId}:
+    patch:
+      tags: [installations]
+      operationId: patchInstallation
+      description: 启用/禁用安装
+      parameters:
+        - name: installationId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [ENABLED, DISABLED]
+      responses:
+        "200":
+          description: 更新后的安装记录
+          content:
+            application/json:
+              schema: { type: object }
+        "400": { $ref: "#/components/responses/PlatformError" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+        "409": { $ref: "#/components/responses/PlatformError" }
+    delete:
+      tags: [installations]
+      operationId: uninstallInstallation
+      description: 卸载（保留历史行）
+      parameters:
+        - name: installationId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 卸载后的安装记录
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/instances/register:
+    post:
+      tags: [instances]
+      operationId: registerInstance
+      description: 实例注册（写入租约; P1-2）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [serviceId, instanceName, endpoint]
+              properties:
+                serviceId: { type: string }
+                instanceName: { type: string }
+                endpoint:
+                  type: string
+                  pattern: "^https?://"
+                leaseTtlSeconds:
+                  type: [integer, "null"]
+                  minimum: 5
+                  maximum: 600
+                metadata:
+                  type: [object, "null"]
+                draining: { type: boolean }
+      responses:
+        "200":
+          description: 注册后的实例
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Instance" }
+        "400": { $ref: "#/components/responses/PlatformError" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/instances/{instanceId}:heartbeat:
+    post:
+      tags: [instances]
+      operationId: heartbeatInstance
+      parameters:
+        - name: instanceId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: lease_ttl_seconds
+          in: query
+          required: false
+          schema: { type: integer }
+      responses:
+        "200":
+          description: 续租后的实例
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Instance" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+        "409": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/instances/{instanceId}:deregister:
+    post:
+      tags: [instances]
+      operationId: deregisterInstance
+      parameters:
+        - name: instanceId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 注销后的实例
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Instance" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/services/{serviceId}/instances:
+    get:
+      tags: [instances]
+      operationId: listInstances
+      parameters:
+        - $ref: "#/components/parameters/ServiceId"
+      responses:
+        "200":
+          description: 实例快照（未过期）
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Instance" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/services/{serviceId}/users:
+    get:
+      tags: [permissions]
+      operationId: listServiceUsers
+      description: 服务维度授权——可使用该服务的用户工号列表（admin-ui 02 §2.7）
+      parameters:
+        - $ref: "#/components/parameters/ServiceId"
+      responses:
+        "200":
+          description: 授权用户列表
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [service_id, capUserNames]
+                properties:
+                  service_id: { type: string }
+                  capUserNames:
+                    type: array
+                    items: { type: string }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+    put:
+      tags: [permissions]
+      operationId: replaceServiceUsers
+      description: 全量替换该服务的授权用户（空列表 = 清空授权，全员不可见）
+      parameters:
+        - $ref: "#/components/parameters/ServiceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [capUserNames]
+              properties:
+                capUserNames:
+                  type: array
+                  items: { type: string }
+      responses:
+        "200":
+          description: 替换后的授权用户列表（去重/去空格/保序）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  service_id: { type: string }
+                  capUserNames:
+                    type: array
+                    items: { type: string }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/traces/{traceId}:
+    get:
+      tags: [traces]
+      operationId: getTrace
+      description: 调用血缘树（P0-4; 详见 invocation-api.v1.yaml）
+      parameters:
+        - name: traceId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 调用血缘树
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+
+  /healthz:
+    get:
+      operationId: healthz
+      security: []
+      responses:
+        "200":
+          description: 存活探针
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+
+  # ===== 性能测试（perf-test 01 §6，T07） =====
+  /api/v1/perf/datasets:
+    get:
+      tags: [perf]
+      operationId: listPerfDatasets
+      parameters:
+        - name: masterId
+          in: query
+          schema: { type: string }
+          description: 按 Agent Team 过滤
+      responses:
+        "200":
+          description: 数据集列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  datasets:
+                    type: array
+                    items: { $ref: "#/components/schemas/PerfDataset" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+    post:
+      tags: [perf]
+      operationId: createPerfDataset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreatePerfDatasetRequest" }
+      responses:
+        "201":
+          description: 数据集元信息
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PerfDataset" }
+        "400": { $ref: "#/components/responses/PlatformError" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+        "409": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/perf/datasets/{datasetId}:
+    get:
+      tags: [perf]
+      operationId: getPerfDataset
+      description: 数据集详情 + 用例预览（分页）
+      parameters:
+        - $ref: "#/components/parameters/PerfDatasetId"
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, default: 50, maximum: 200 }
+      responses:
+        "200":
+          description: 数据集详情与用例
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+    delete:
+      tags: [perf]
+      operationId: deletePerfDataset
+      description: 删除数据集；被测试记录引用时 409 拒绝
+      parameters:
+        - $ref: "#/components/parameters/PerfDatasetId"
+      responses:
+        "200":
+          description: 已删除
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+        "409": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/perf/datasets/{datasetId}:upload:
+    post:
+      tags: [perf]
+      operationId: uploadPerfDataset
+      description: 上传 CSV/XLSX，解析并写入用例（重复上传覆盖旧用例）
+      parameters:
+        - $ref: "#/components/parameters/PerfDatasetId"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: 解析结果（case_count）
+          content:
+            application/json:
+              schema: { type: object }
+        "400": { $ref: "#/components/responses/PlatformError" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+        "413": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/perf/tests:
+    get:
+      tags: [perf]
+      operationId: listPerfTests
+      parameters:
+        - name: masterId
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: 测试历史列表
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/PlatformError" }
+    post:
+      tags: [perf]
+      operationId: createPerfTest
+      description: 创建测试（校验数据集归属/目标存在/全局锁）；执行在独立 perf-worker
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreatePerfTestRequest" }
+      responses:
+        "201":
+          description: 已创建（PENDING，等待 perf-worker 领取）
+          content:
+            application/json:
+              schema: { type: object }
+        "400": { $ref: "#/components/responses/PlatformError" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+        "409": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/perf/tests/{testId}:
+    get:
+      tags: [perf]
+      operationId: getPerfTest
+      description: 测试详情 + 实时进度 + 仿真下次触发时间
+      parameters:
+        - $ref: "#/components/parameters/PerfTestId"
+      responses:
+        "200":
+          description: 测试详情
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/perf/tests/{testId}/samples:
+    get:
+      tags: [perf]
+      operationId: listPerfSamples
+      parameters:
+        - $ref: "#/components/parameters/PerfTestId"
+        - name: status
+          in: query
+          schema: { type: string, enum: [SUCCEEDED, TIMEOUT, FAILED, REJECTED] }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, default: 50, maximum: 200 }
+      responses:
+        "200":
+          description: 样本明细分页
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/perf/tests/{testId}:cancel:
+    post:
+      tags: [perf]
+      operationId: cancelPerfTest
+      description: PENDING 直接终态 CANCELED；RUNNING 置 cancel_flag 由 worker 检查点处理
+      parameters:
+        - $ref: "#/components/parameters/PerfTestId"
+      responses:
+        "200":
+          description: 取消结果
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+        "409": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/perf/tests/{testId}:analyze:
+    post:
+      tags: [perf]
+      operationId: analyzePerfTest
+      description: |
+        DEV-09: 用 LLM 基于结构化报告生成自然语言分析（瓶颈定位/归因/基线
+        对比/建议）。防编造校验: 报告中的数字必须在输入摘要中有出处，否则
+        拒绝入库。可对同一测试重复生成（覆盖）。
+      parameters:
+        - $ref: "#/components/parameters/PerfTestId"
+      responses:
+        "200":
+          description: 生成结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  analysis_md: { type: string }
+                  analysis_model: { type: string }
+                  analysis_at: { type: string }
+                  numbers_checked: { type: integer }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+        "409": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/perf/tests/{testId}/analysis:
+    get:
+      tags: [perf]
+      operationId: getPerfAnalysis
+      description: 获取已生成的分析报告；download=true 以 Markdown 附件下载
+      parameters:
+        - $ref: "#/components/parameters/PerfTestId"
+        - name: download
+          in: query
+          schema: { type: boolean, default: false }
+      responses:
+        "200":
+          description: 分析报告
+          content:
+            application/json:
+              schema: { type: object }
+            text/markdown:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+
+  # ===== Higress 网关配置控制面（higress-mcp-gateway 01 §5.2，T05/T16） =====
+  # 01 §5.2 契约 15 路径全部包含；另含 profile 单个管理（GET/PUT/DELETE）、
+  # consumer DELETE、import 共 4 条补充路径（03 T05/T15）
+  /api/v1/gateway/profiles:
+    get:
+      tags: [gateway]
+      operationId: listGatewayProfiles
+      responses:
+        "200":
+          description: 网关环境列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  profiles:
+                    type: array
+                    items: { $ref: "#/components/schemas/GatewayProfile" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "403": { $ref: "#/components/responses/PlatformError" }
+    post:
+      tags: [gateway]
+      operationId: createGatewayProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateGatewayProfileRequest" }
+      responses:
+        "201":
+          description: 已创建
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GatewayProfile" }
+        "400": { $ref: "#/components/responses/PlatformError" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "409": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/gateway/profiles/{profileId}:
+    get:
+      tags: [gateway]
+      operationId: getGatewayProfile
+      parameters:
+        - $ref: "#/components/parameters/GatewayProfileId"
+      responses:
+        "200":
+          description: 环境详情
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GatewayProfile" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+    put:
+      tags: [gateway]
+      operationId: updateGatewayProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateGatewayProfileRequest" }
+      responses:
+        "200":
+          description: 已更新
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GatewayProfile" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+    delete:
+      tags: [gateway]
+      operationId: deleteGatewayProfile
+      description: 仅允许删除无受管资源的环境（有则 409）
+      parameters:
+        - $ref: "#/components/parameters/GatewayProfileId"
+      responses:
+        "200":
+          description: 已删除
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+        "409": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/gateway/profiles/{profileId}/status:
+    get:
+      tags: [gateway]
+      operationId: getGatewayProfileStatus
+      description: 连通性探测（controller/gateway/console 就绪 + 版本）+ 资源计数汇总
+      parameters:
+        - $ref: "#/components/parameters/GatewayProfileId"
+      responses:
+        "200":
+          description: 状态总览
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "403": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/gateway/profiles/{profileId}/mcp-services:
+    get:
+      tags: [gateway]
+      operationId: listGatewayMcpServices
+      description: DB 镜像 + McpBridge 线上 registries 反显（live 字段 K8s 失联时降级 null）
+      parameters:
+        - $ref: "#/components/parameters/GatewayProfileId"
+      responses:
+        "200":
+          description: MCP 服务列表
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+    post:
+      tags: [gateway]
+      operationId: registerGatewayMcpService
+      description: |
+        注册 MCP 服务：仅填上游 = 写 McpBridge registry；同时带 provider/route
+        = 四步写序列（McpBridge → ai-proxy → key-auth → ai-route，02 §6），
+        任一步失败自动回滚并记审计。带鉴权时响应一次性回显 consumer 明文密钥。
+      parameters:
+        - $ref: "#/components/parameters/GatewayProfileId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterGatewayMcpServiceRequest" }
+      responses:
+        "201":
+          description: 注册结果（consumer.credential 仅此一次明文）
+          content:
+            application/json:
+              schema: { type: object }
+        "400": { $ref: "#/components/responses/PlatformError" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "403": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+        "409": { $ref: "#/components/responses/PlatformError" }
+        "502": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/gateway/profiles/{profileId}/mcp-services/{name}:
+    delete:
+      tags: [gateway]
+      operationId: deleteGatewayMcpService
+      description: 移除 registry（+ ai-proxy provider）；仍有路由引用时 409
+      parameters:
+        - $ref: "#/components/parameters/GatewayProfileId"
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 已删除
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+        "409": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/gateway/profiles/{profileId}/routes:
+    get:
+      tags: [gateway]
+      operationId: listGatewayRoutes
+      parameters:
+        - $ref: "#/components/parameters/GatewayProfileId"
+      responses:
+        "200":
+          description: 路由列表
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+    post:
+      tags: [gateway]
+      operationId: createGatewayRoute
+      description: 创建 ai-route ConfigMap（payload 严格照 02 基准 §3）
+      parameters:
+        - $ref: "#/components/parameters/GatewayProfileId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateGatewayRouteRequest" }
+      responses:
+        "201":
+          description: 已创建
+          content:
+            application/json:
+              schema: { type: object }
+        "400": { $ref: "#/components/responses/PlatformError" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+        "409": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/gateway/profiles/{profileId}/routes/{name}:
+    put:
+      tags: [gateway]
+      operationId: updateGatewayRoute
+      description: 更新路由（consumers 字段整体替换绑定集并联动重写 CM）
+      parameters:
+        - $ref: "#/components/parameters/GatewayProfileId"
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateGatewayRouteRequest" }
+      responses:
+        "200":
+          description: 已更新
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+        "409": { $ref: "#/components/responses/PlatformError" }
+    delete:
+      tags: [gateway]
+      operationId: deleteGatewayRoute
+      parameters:
+        - $ref: "#/components/parameters/GatewayProfileId"
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 已删除
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/gateway/profiles/{profileId}/consumers:
+    get:
+      tags: [gateway]
+      operationId: listGatewayConsumers
+      description: 密钥只回显尾 4 位（****abcd）
+      parameters:
+        - $ref: "#/components/parameters/GatewayProfileId"
+      responses:
+        "200":
+          description: consumer 列表
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+    post:
+      tags: [gateway]
+      operationId: createGatewayConsumer
+      description: 创建 consumer（密钥缺省自动生成；响应一次性回显明文）
+      parameters:
+        - $ref: "#/components/parameters/GatewayProfileId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateGatewayConsumerRequest" }
+      responses:
+        "201":
+          description: 已创建（credential 明文仅此一次）
+          content:
+            application/json:
+              schema: { type: object }
+        "400": { $ref: "#/components/responses/PlatformError" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "409": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/gateway/profiles/{profileId}/consumers/{name}/rotate:
+    post:
+      tags: [gateway]
+      operationId: rotateGatewayConsumer
+      description: 轮换密钥（宽限期内新旧双 key 有效；到期旧 key 自动下线）
+      parameters:
+        - $ref: "#/components/parameters/GatewayProfileId"
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 新密钥（明文仅此一次）
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+        "500": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/gateway/profiles/{profileId}/consumers/{name}:
+    delete:
+      tags: [gateway]
+      operationId: deleteGatewayConsumer
+      description: 从 key-auth 摘除并联动重写绑定路由的 allowedConsumers
+      parameters:
+        - $ref: "#/components/parameters/GatewayProfileId"
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 已删除
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/gateway/profiles/{profileId}/audits:
+    get:
+      tags: [gateway]
+      operationId: listGatewayAudits
+      parameters:
+        - $ref: "#/components/parameters/GatewayProfileId"
+        - name: resourceType
+          in: query
+          schema:
+            type: string
+            enum: [profile, mcpbridge, wasmplugin, route, consumer, sync]
+        - name: result
+          in: query
+          schema: { type: string, enum: [success, failed] }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, default: 50, maximum: 200 }
+      responses:
+        "200":
+          description: 审计分页
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/gateway/profiles/{profileId}/export:
+    get:
+      tags: [gateway]
+      operationId: exportGatewayConfig
+      description: 导出全量配置（consumer 密钥永不导出；apiTokens 默认脱敏）
+      parameters:
+        - $ref: "#/components/parameters/GatewayProfileId"
+        - name: include_secrets
+          in: query
+          schema: { type: boolean, default: false }
+          description: 显式携带 provider apiTokens（跨环境迁移动作）
+      responses:
+        "200":
+          description: 配置 JSON（eagent-gateway-config v1）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GatewayConfigExport" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/gateway/profiles/{profileId}/import:
+    post:
+      tags: [gateway]
+      operationId: importGatewayConfig
+      description: 校验引用完整性后按四步写序列导入（consumer 重新生成密钥）
+      parameters:
+        - $ref: "#/components/parameters/GatewayProfileId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GatewayConfigExport" }
+      responses:
+        "200":
+          description: 导入结果（created 含一次性新密钥 / failed 逐项错误码）
+          content:
+            application/json:
+              schema: { type: object }
+        "400": { $ref: "#/components/responses/PlatformError" }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+
+
+  # ------------------------------------------------------------------
+  # 评测 / 标注 / 提示词优化闭环（能力④ Loop Engineer）
+  # 闭环: 运行记录 →（挑样本）评测集 → 标注（可纠正期望值）→ 优化任务
+  #      → 候选对比 → 人工发布 → 新的运行记录
+  # ------------------------------------------------------------------
+  /api/v1/datasets:
+    get:
+      tags: [eval]
+      operationId: listDatasets
+      parameters:
+        - name: master_id
+          in: query
+          required: false
+          schema: { type: string }
+          description: 只看该 Agent Team 的评测集（不传则全量）
+      responses:
+        "200":
+          description: 评测集列表
+          content:
+            application/json:
+              schema: { type: array, items: { type: object } }
+        "401": { $ref: "#/components/responses/PlatformError" }
+    post:
+      tags: [eval]
+      operationId: createDataset
+      description: |
+        从运行记录抽样建评测集。runIds 为空时取该 Agent Team 最近 50 条 SUCCEEDED。
+        用例的 expected_service 取源运行的首个路由，可由标注纠正。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, masterId]
+              properties:
+                name: { type: string }
+                masterId: { type: string }
+                runIds:
+                  type: array
+                  items: { type: string }
+                  description: 指定运行记录；空数组表示自动抽样
+      responses:
+        "200":
+          description: 新建的评测集
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  dataset_id: { type: string }
+                  name: { type: string }
+                  version_no: { type: integer }
+                  cases: { type: integer }
+        "401": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/datasets/{datasetId}:
+    patch:
+      tags: [eval]
+      operationId: renameDataset
+      parameters:
+        - $ref: "#/components/parameters/DatasetId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        "200":
+          description: 改名后的评测集
+          content:
+            application/json:
+              schema: { type: object }
+        "404": { $ref: "#/components/responses/PlatformError" }
+    delete:
+      tags: [eval]
+      operationId: deleteDataset
+      description: 删除评测集及其用例与标注；优化运行记录保留供追溯。
+      parameters:
+        - $ref: "#/components/parameters/DatasetId"
+      responses:
+        "200":
+          description: 已删除
+          content:
+            application/json:
+              schema: { type: object }
+        "404": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/datasets/{datasetId}/cases:
+    get:
+      tags: [eval]
+      operationId: listCases
+      description: |
+        用例 + 标注历史 + 源运行的 trace_id / status / error_code
+        （带 trace_id 是为了让标注工作台能直接跳到调用链）。
+      parameters:
+        - $ref: "#/components/parameters/DatasetId"
+      responses:
+        "200":
+          description: 用例列表
+          content:
+            application/json:
+              schema: { type: array, items: { type: object } }
+        "404": { $ref: "#/components/responses/PlatformError" }
+    post:
+      tags: [eval]
+      operationId: appendCases
+      description: |
+        把指定运行记录追加进已有评测集（运行监控/调用链上的「加入测试集」入口）。
+        同一 run 只进一次，重复的计入 skipped。
+      parameters:
+        - $ref: "#/components/parameters/DatasetId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [runIds]
+              properties:
+                runIds: { type: array, items: { type: string } }
+      responses:
+        "200":
+          description: 追加结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  added: { type: integer }
+                  skipped: { type: integer }
+        "404": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/cases/{caseId}/annotations:
+    post:
+      tags: [eval]
+      operationId: annotateCase
+      description: |
+        人工标注。标注记录只追加，唯一会改写数据的是 correctedService——
+        给出「正确答案该是哪个服务」时回写 eag_eval_case.expected_service（013）。
+        判为错误却不给正确答案的用例，优化时会被排除在评分之外。
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                intentCorrect: { type: boolean, nullable: true }
+                subjectiveNote: { type: string, nullable: true }
+                correctedService:
+                  type: string
+                  nullable: true
+                  description: 正确答案应该是哪个工具/服务；回写期望值
+                expectedText:
+                  type: string
+                  nullable: true
+                  description: |
+                    标准答案文本（014 / DEV-07）；回写 expected_text，
+                    回放时参与 BLEU/ROUGE/F1 文本指标。经模式化脱敏后落库
+      responses:
+        "200":
+          description: 标注结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  annotation_id: { type: string }
+                  expected_service_updated: { type: boolean }
+        "404": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/optimizations:
+    get:
+      tags: [eval]
+      operationId: listOptimizations
+      description: |
+        优化任务列表。任务要跑几分钟，没有列表的话 optimization_id 只存在于
+        发起它的那个页面内存里，刷新即丢。查询时顺带清扫超时僵尸任务
+        （任务跑在进程内的 BackgroundTasks 里，进程重启会把它杀掉）。
+      parameters:
+        - name: master_id
+          in: query
+          schema: { type: string }
+        - name: dataset_id
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20, maximum: 100 }
+      responses:
+        "200":
+          description: 任务列表（含 dataset_name / candidate_count / recommendation）
+          content:
+            application/json:
+              schema: { type: array, items: { type: object } }
+        "401": { $ref: "#/components/responses/PlatformError" }
+    post:
+      tags: [eval]
+      operationId: createOptimization
+      description: |
+        发起优化（后台执行，只产 DRAFT 候选，绝不自动发布）。
+        前置校验：评测集非空；同一 Agent Team 不允许并发优化。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [masterId, datasetId]
+              properties:
+                masterId: { type: string }
+                datasetId: { type: string }
+      responses:
+        "200":
+          description: 任务已发起
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  optimization_id: { type: string }
+                  status: { type: string }
+        "400": { $ref: "#/components/responses/PlatformError" }
+        "409": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/optimizations/{optimizationId}:
+    get:
+      tags: [eval]
+      operationId: getOptimization
+      parameters:
+        - $ref: "#/components/parameters/OptimizationId"
+      responses:
+        "200":
+          description: 任务 + 候选（含 metric_json.annotation 标注影响统计）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  optimization: { type: object }
+                  candidates: { type: array, items: { type: object } }
+        "404": { $ref: "#/components/responses/PlatformError" }
+
+
+  /api/v1/optimizations/{optimizationId}/candidates/{candidateId}/approve:
+    post:
+      tags: [eval]
+      operationId: approveCandidate
+      description: |
+        人工复核通过 → 发布候选。绝不自动发布（D7），本接口即人工确认。
+
+        候选是「提示词 + ReAct 参数」两件套（L3）：优化在 max_iters 小网格上搜过
+        最优值，指标是按那个轮数测出来的。因此发布时**连同 react_config 一起落**，
+        否则线上跑的是"新提示词 + 旧轮数"，报告里的准确率在线上不可复现。
+        候选没带合法 ReAct 参数时 react_config 返回 null，只发布提示词。
+
+        仅 PROPOSE 且已生成 DRAFT 版本的候选可发布，否则 409。
+      parameters:
+        - $ref: "#/components/parameters/OptimizationId"
+        - $ref: "#/components/parameters/CandidateId"
+      responses:
+        "200":
+          description: 已发布
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  approved: { type: boolean }
+                  candidate_id: { type: string }
+                  published_prompt_version_id: { type: string }
+                  hot_update: { type: boolean }
+                  react_config:
+                    type: object
+                    nullable: true
+                    description: 本次顺带落的 ReAct 参数；null = 未改动
+                    properties:
+                      max_iters: { type: integer }
+                      changed: { type: boolean }
+                      previous: { type: integer, nullable: true }
+        "404": { $ref: "#/components/responses/PlatformError" }
+        "409": { $ref: "#/components/responses/PlatformError" }
+
+  /api/v1/optimizations/{optimizationId}/candidates/{candidateId}/reject:
+    post:
+      tags: [eval]
+      operationId: rejectCandidate
+      description: 人工驳回候选（幂等）——标记 REJECTED，不触碰提示词版本。
+      parameters:
+        - $ref: "#/components/parameters/OptimizationId"
+        - $ref: "#/components/parameters/CandidateId"
+      responses:
+        "200":
+          description: 已驳回
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rejected: { type: boolean }
+                  candidate_id: { type: string }
+        "404": { $ref: "#/components/responses/PlatformError" }
+
+components:
+  parameters:
+    DatasetId:
+      name: datasetId
+      in: path
+      required: true
+      schema: { type: string }
+    OptimizationId:
+      name: optimizationId
+      in: path
+      required: true
+      schema: { type: string }
+    CandidateId:
+      name: candidateId
+      in: path
+      required: true
+      schema: { type: string }
+    ServiceId:
+      name: serviceId
+      in: path
+      required: true
+      schema: { type: string }
+    GatewayProfileId:
+      name: profileId
+      in: path
+      required: true
+      schema: { type: integer }
+      description: 网关环境 id（eag_gateway_profile.id）
+    PerfDatasetId:
+      name: datasetId
+      in: path
+      required: true
+      schema: { type: string }
+    PerfTestId:
+      name: testId
+      in: path
+      required: true
+      schema: { type: string }
+    ReleaseId:
+      name: releaseId
+      in: path
+      required: true
+      schema: { type: string }
+    MasterId:
+      name: masterId
+      in: path
+      required: true
+      schema: { type: string }
+
+  securitySchemes:
+    capUser:
+      type: apiKey
+      in: header
+      name: cap-user-name
+    adminToken:
+      type: apiKey
+      in: header
+      name: X-Admin-Token
+
+  responses:
+    PlatformError:
+      description: 平台统一错误（platform-error.v1 契约）
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/PlatformError" }
+
+  schemas:
+    PlatformError:
+      type: object
+      required: [code, message, traceId]
+      properties:
+        code:
+          type: string
+          pattern: "^[A-Z][A-Z0-9_]{1,63}$"
+        message:
+          type: string
+          maxLength: 512
+        traceId:
+          type: [string, "null"]
+        details:
+          type: array
+          items:
+            type: object
+            required: [field, issue]
+            properties:
+              field: { type: string }
+              issue: { type: string }
+
+    RegisterServiceRequest:
+      type: object
+      required: [slug, displayName, agentCardUrl]
+      properties:
+        slug:
+          type: string
+          minLength: 2
+          maxLength: 64
+        displayName: { type: string }
+        agentCardUrl:
+          type: string
+          pattern: "^https?://"
+        authSecretRef:
+          # intranet-a2a-stream-adapter: 服务级出站凭证 headers JSON
+          # （如 {"apikey": "..."}），AES-GCM 加密落库，出站调用注入；
+          # 响应不回显（只回 outbound_credential_configured 布尔）。
+          type: [object, "null"]
+          additionalProperties: { type: string }
+        tags:
+          type: [string, "null"]
+
+    UpdateServiceCredentialsRequest:
+      type: object
+      description: 更新服务级出站凭证 headers；headers=null 表示清除。
+      properties:
+        headers:
+          type: [object, "null"]
+          additionalProperties: { type: string }
+
+    ProbeServiceRequest:
+      type: object
+      required: [agentCardUrl]
+      properties:
+        agentCardUrl:
+          type: string
+          pattern: "^https?://"
+
+    ProbeServiceResult:
+      type: object
+      required: [baseUrl, card, compatibility, compatibilityReason]
+      properties:
+        baseUrl: { type: string }
+        compatibility: { type: string, enum: [VERIFYING, COMPATIBLE, INCOMPATIBLE] }
+        compatibilityReason: { type: string }
+        card:
+          type: object
+          required: [name, description, url, version, protocolVersion, capabilities, skills]
+          properties:
+            name: { type: string }
+            description: { type: string }
+            url: { type: string }
+            version: { type: string }
+            protocolVersion: { type: string }
+            capabilities: { type: object }
+            skills:
+              type: array
+              items:
+                type: object
+                properties:
+                  id: { type: [string, "null"] }
+                  name: { type: string }
+                  description: { type: string }
+                  tags: { type: array, items: { type: string } }
+
+    CreateMasterRequest:
+      type: object
+      required: [slug, displayName]
+      description: 统一注册入口。sourceType=COMPOSITE（缺省）建 Agent Team；HIAGENT 注册 HIA agent 为单 Agent A2A 服务（注册即连通性测试，本地契约错误返回 400，远端失败返回 502，均不落库；成功即挂载 /a2a/{slug}/）
+      properties:
+        slug: { type: string }
+        displayName: { type: string }
+        description: { type: [string, "null"] }
+        maxIters:
+          type: integer
+          default: 8
+        sourceType:
+          type: string
+          enum: [COMPOSITE, HIAGENT]
+          default: COMPOSITE
+        baseUrl:
+          type: [string, "null"]
+          description: HIAGENT 专属——实例级服务地址；空 = 全局 HIAGENT_URL 兜底链
+        appKey:
+          type: [string, "null"]
+          description: HIAGENT 专属——实例级 AppKey（AES-GCM 加密落库，永不回显）；空 = 全局 HIAGENT_API_KEY 兜底
+        skills:
+          type: array
+          nullable: true
+          description: HIAGENT 专属——生成式 Agent Card 的 skills 素材
+          items:
+            type: object
+            additionalProperties: true
+        inputsSchema:
+          type: [object, "null"]
+          description: HIAGENT 专属——业务 Inputs 的 JSON Schema；object 节点必须设 additionalProperties=false
+          additionalProperties: true
+        connectionTest:
+          type: [object, "null"]
+          description: HIAGENT 专属——注册真实探测的问题与业务 Inputs；inputs 必须满足 inputsSchema
+          required: [query, inputs]
+          additionalProperties: false
+          properties:
+            query: { type: string, minLength: 1 }
+            inputs:
+              type: object
+              additionalProperties: true
+
+    ServiceRegistration:
+      type: object
+      description: 服务注册记录（eag_a2a_service_registration 行）
+      properties:
+        sourceType:
+          type: string
+          enum: [A2A_REMOTE, HIAGENT]
+          description: 来源（HIAGENT = HIA agent，Card 由平台生成）
+        service_id: { type: string }
+        slug: { type: string }
+        display_name: { type: string }
+        agent_card_url: { type: string }
+        auth_secret_ref:
+          # 响应不再回显（intranet-a2a-stream-adapter: 密文不出 API 面），
+          # 保留字段位兼容旧客户端读取 null。
+          type: ["null"]
+        outbound_credential_configured: { type: boolean }
+        tags:
+          type: [string, "null"]
+        enabled: { type: integer }
+        compatibility: { type: string }
+        current_revision_id:
+          type: [string, "null"]
+        created_at: { type: string }
+        updated_at: { type: string }
+
+    AgentRelease:
+      type: object
+      description: 不可变发布版本（eag_agent_release 行; 契约 agent-release.v1）
+      properties:
+        release_id: { type: string }
+        service_id: { type: string }
+        agent_version: { type: string }
+        card_revision_id: { type: string }
+        card_digest:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        endpoint: { type: string }
+        state:
+          type: string
+          enum: [DRAFT, PUBLISHED, SUSPENDED, REVOKED]
+        created_by: { type: string }
+        created_at: { type: string }
+        published_at:
+          type: [string, "null"]
+        suspended_at:
+          type: [string, "null"]
+        revoked_at:
+          type: [string, "null"]
+
+    Instance:
+      type: object
+      description: 实例快照（eag_agent_instance 行; P1-2）
+      properties:
+        instanceId: { type: string }
+        serviceId: { type: string }
+        instanceName: { type: string }
+        endpoint: { type: string }
+        state:
+          type: string
+          enum: [UNKNOWN, READY, DRAINING, UNAVAILABLE]
+        ready: { type: boolean }
+        serving: { type: boolean }
+        terminating: { type: boolean }
+        leaseExpiresAt:
+          type: [string, "null"]
+        lastHeartbeatAt:
+          type: [string, "null"]
+        metadata: { type: object }
+
+    PerfDataset:
+      type: object
+      description: 性能测试数据集（eag_perf_dataset 行）
+      properties:
+        perf_dataset_id: { type: string }
+        master_id: { type: string }
+        name: { type: string }
+        dataset_type:
+          type: string
+          enum: [PRESSURE, SIMULATION]
+        status: { type: string }
+        case_count: { type: integer }
+        created_by: { type: string }
+        created_at: { type: string }
+        updated_at: { type: string }
+
+    CreatePerfDatasetRequest:
+      type: object
+      required: [masterId, name, datasetType]
+      properties:
+        masterId: { type: string }
+        name: { type: string, maxLength: 128 }
+        datasetType:
+          type: string
+          enum: [PRESSURE, SIMULATION]
+
+    CreatePerfTestRequest:
+      type: object
+      required: [masterId, datasetId, targetType, targetId, testType]
+      properties:
+        masterId: { type: string }
+        datasetId: { type: string }
+        targetType:
+          type: string
+          enum: [MASTER, SERVICE]
+        targetId: { type: string }
+        testType:
+          type: string
+          enum: [PRESSURE, SIMULATION]
+        pressure:
+          type: object
+          description: 压力测试配置（testType=PRESSURE 必填）
+          properties:
+            concurrency: { type: integer, default: 5, maximum: 500 }
+            totalRequests: { type: integer, default: 0 }
+            durationSec: { type: number, default: 0 }
+            rampUpSec: { type: number, default: 0 }
+            timeoutMs: { type: integer, default: 60000 }
+            capUser: { type: string }
+            caseOrder:
+              type: string
+              enum: [ROUND_ROBIN, RANDOM]
+              default: ROUND_ROBIN
+            headers:
+              type: object
+              additionalProperties: { type: string }
+        simulation:
+          type: object
+          description: 仿真测试配置（testType=SIMULATION 必填）
+          properties:
+            timeoutMs: { type: integer, default: 60000 }
+            capUser: { type: string }
+            maxConcurrency: { type: integer, default: 0, description: 0 = 不限 }
+            headers:
+              type: object
+              additionalProperties: { type: string }
+
+    # ===== Higress 网关配置控制面（higress-mcp-gateway 01 §5.2，T16） =====
+    GatewayProfile:
+      type: object
+      description: 网关环境（形态 A 跨 ns / 形态 B 同 ns 共用同一模型）
+      required: [id, name, higressNs]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        higressNs: { type: string }
+        kubeContext: { type: string }
+        higressVersion: { type: [string, "null"] }
+        enabled: { type: boolean }
+        createdAt: { type: string }
+        updatedAt: { type: string }
+    CreateGatewayProfileRequest:
+      type: object
+      required: [name, higressNs]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        higressNs: { type: string, minLength: 1, maxLength: 64 }
+        kubeContext: { type: string, maxLength: 128, default: "" }
+        higressVersion: { type: [string, "null"], maxLength: 16 }
+    UpdateGatewayProfileRequest:
+      type: object
+      properties:
+        higressNs: { type: string, minLength: 1, maxLength: 64 }
+        kubeContext: { type: string, maxLength: 128 }
+        higressVersion: { type: [string, "null"], maxLength: 16 }
+        enabled: { type: boolean }
+    GatewayProviderConfig:
+      type: object
+      description: ai-proxy provider（02 基准 §5：id=llm-<slug> 由服务名推导）
+      required: [type, apiUrl]
+      properties:
+        type: { type: string, description: "provider 类型（如 deepseek/openai/qwen）" }
+        protocol: { type: string, default: openai }
+        apiUrl: { type: string }
+        apiTokens: { type: array, items: { type: string } }
+    GatewayRouteSpec:
+      type: object
+      description: 一键注册时的路由子对象（四步写序列第 4 步）
+      properties:
+        routeName: { type: [string, "null"], description: 缺省 route-<slug> }
+        matchType: { type: string, enum: [PRE, EXACT, REGEX], default: PRE }
+        matchValue: { type: string, default: "/" }
+        weight: { type: integer, default: 100 }
+        authEnabled: { type: boolean, default: true }
+        retryEnabled: { type: boolean, default: true }
+        retryAttempts: { type: integer, default: 3 }
+        consumerName: { type: [string, "null"], description: 缺省 consumer-<slug> }
+    RegisterGatewayMcpServiceRequest:
+      type: object
+      required: [name, domain]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 128 }
+        domain: { type: string, minLength: 1, maxLength: 255 }
+        port: { type: integer, default: 443 }
+        protocol: { type: string, default: https }
+        registryType: { type: string, enum: [dns, static, failover], default: dns }
+        provider: { $ref: "#/components/schemas/GatewayProviderConfig" }
+        route: { $ref: "#/components/schemas/GatewayRouteSpec" }
+    CreateGatewayRouteRequest:
+      type: object
+      required: [name, matchValue, upstreamName]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 128 }
+        matchType: { type: string, enum: [PRE, EXACT, REGEX], default: PRE }
+        matchValue: { type: string, minLength: 1, maxLength: 512 }
+        upstreamName: { type: string, description: MCP 服务名（自动解析 registry/provider 引用链） }
+        weight: { type: integer, default: 100 }
+        authEnabled: { type: boolean, default: true }
+        authType: { type: string, default: key-auth }
+        retryEnabled: { type: boolean, default: true }
+        retryAttempts: { type: integer, default: 3 }
+        consumers: { type: array, items: { type: string }, description: 绑定的 consumer 名单 }
+    UpdateGatewayRouteRequest:
+      type: object
+      description: 全部字段可选；consumers 传入即整体替换绑定集
+      properties:
+        matchType: { type: string, enum: [PRE, EXACT, REGEX] }
+        matchValue: { type: string, minLength: 1, maxLength: 512 }
+        upstreamName: { type: string }
+        weight: { type: integer }
+        authEnabled: { type: boolean }
+        authType: { type: string }
+        retryEnabled: { type: boolean }
+        retryAttempts: { type: integer }
+        consumers: { type: array, items: { type: string } }
+    CreateGatewayConsumerRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 128 }
+        credential:
+          type: [string, "null"]
+          description: 缺省自动生成（随机 32B base64url）；显式传入用于导入
+        routes: { type: array, items: { type: string } }
+    GatewayConfigExport:
+      type: object
+      description: 网关配置导出/导入载体（exportVersion=1；consumer 密钥永不导出）
+      required: [kind]
+      properties:
+        exportVersion: { type: integer }
+        kind: { type: string, enum: [eagent-gateway-config] }
+        source: { type: object }
+        secretsIncluded: { type: boolean }
+        mcpServices:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              domain: { type: string }
+              port: { type: integer }
+              protocol: { type: string }
+              registryType: { type: string }
+              providerConfig: { $ref: "#/components/schemas/GatewayProviderConfig" }
+        routes:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              matchType: { type: string }
+              matchValue: { type: string }
+              upstreamName: { type: string }
+              weight: { type: integer }
+              authEnabled: { type: boolean }
+              retryEnabled: { type: boolean }
+              retryAttempts: { type: integer }
+        consumers:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              routes: { type: array, items: { type: string } }

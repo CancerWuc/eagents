@@ -1,0 +1,87 @@
+openapi: 3.1.0
+info:
+  title: eAgent 调用与 Trace 查询 API
+  version: "1.1.0"
+  description: |
+    P0-4 已落地: GET /api/v1/traces/{traceId} 返回按 invocation 聚合的
+    调用血缘树（见 from_nekiro/04-invocation-ledger-trace.md §6）。
+    事件 append-only，不包含输入输出与密钥。
+servers:
+  - url: /
+paths:
+  /api/v1/traces/{traceId}:
+    get:
+      operationId: getTrace
+      tags: [traces]
+      parameters:
+        - name: traceId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 调用血缘树
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [traceId, rootTaskId, invocations]
+                properties:
+                  traceId: { type: string }
+                  rootTaskId: { type: string }
+                  invocations:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        invocationId: { type: string }
+                        parentInvocationId:
+                          type: [string, "null"]
+                        rootTaskId: { type: string }
+                        workspaceId:
+                          type: [string, "null"]
+                        masterId:
+                          type: [string, "null"]
+                        serviceId:
+                          type: [string, "null"]
+                        releaseId:
+                          type: [string, "null"]
+                        status: { type: string }
+                        errorCode:
+                          type: [string, "null"]
+                        startedAt: { type: string }
+                        finishedAt:
+                          type: [string, "null"]
+                        events:
+                          type: array
+                          items: { type: object }
+        "401": { $ref: "#/components/responses/PlatformError" }
+        "404": { $ref: "#/components/responses/PlatformError" }
+components:
+  responses:
+    PlatformError:
+      description: 平台统一错误（platform-error.v1 契约）
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/PlatformError" }
+  schemas:
+    PlatformError:
+      type: object
+      required: [code, message, traceId]
+      properties:
+        code:
+          type: string
+          pattern: "^[A-Z][A-Z0-9_]{1,63}$"
+        message:
+          type: string
+          maxLength: 512
+        traceId:
+          type: [string, "null"]
+        details:
+          type: array
+          items:
+            type: object
+            required: [field, issue]
+            properties:
+              field: { type: string }
+              issue: { type: string }

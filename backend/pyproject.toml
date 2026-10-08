@@ -1,0 +1,37 @@
+[project]
+name = "eagent-gateway"
+version = "0.1.0"
+description = "eAgent A2A 网关: 服务注册 + 意图总控 Multi-Agent + Loop Engineer"
+requires-python = ">=3.11"
+dependencies = [
+    "agentscope==2.0.1",
+    # A2A protocol 1.0, protobuf types; legacy compatibility is disabled.
+    "a2a-sdk[http-server]==1.1.2",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "sqlalchemy>=2.0",
+    "pymysql>=1.1",
+    "cryptography>=42.0",
+    "httpx>=0.27",
+    "pydantic>=2.7",
+    "jsonschema>=4.23",
+    "pyjwt>=2.8",
+    # 性能测试数据集 XLSX 解析（perf-test 01 §11，T02）
+    "openpyxl>=3.1",
+    # Higress 网关配置控制面：K8s 官方 client（higress-mcp-gateway 03 T02）
+    "kubernetes>=28.1",
+]
+
+[project.optional-dependencies]
+# KB 对象存储同步（from_llm_wiki/08 §4.2 / R-05）：启用 EAGENT_KB_OSS_* 时安装
+kb-oss = ["minio>=7.2"]
+# KB MCP 对外暴露（from_llm_wiki/09，streamable-http）：EAGENT_KB_MCP_ENABLED=1 时安装。
+# ⚠️ 锁 <2：mcp 2.0 移除 mcp.server.fastmcp 路径（API 不兼容，实测）
+kb-mcp = ["mcp>=1.2,<2"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/eagent_gateway", "src/eagent_sdk"]

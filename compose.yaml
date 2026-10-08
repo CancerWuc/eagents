@@ -1,0 +1,44 @@
+name: eagents-core
+services:
+  mysql:
+    image: mysql:5.7
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: eagent
+      MYSQL_USER: eagent
+      MYSQL_PASSWORD: ${EAGENT_DB_PASSWORD:?Set EAGENT_DB_PASSWORD}
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./backend/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$$MYSQL_USER -p$$MYSQL_PASSWORD --silent"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  backend:
+    build: ./backend
+    env_file: ./backend/.env.local
+    environment:
+      EAGENT_DB_HOST: mysql
+      EAGENT_DB_PORT: "3306"
+      EAGENT_DB_USER: eagent
+      EAGENT_DB_NAME: eagent
+      EAGENT_AUTH_MODE: strict
+    ports:
+      - "127.0.0.1:${EAGENT_BACKEND_PORT:-8188}:8080"
+    volumes:
+      - kb-data:/app/kb_data
+    depends_on:
+      mysql:
+        condition: service_healthy
+  frontend:
+    build: ./frontend
+    environment:
+      EAGENT_BACKEND_UPSTREAM: backend:8080
+    ports:
+      - "127.0.0.1:${EAGENT_FRONTEND_PORT:-5173}:80"
+    depends_on:
+      - backend
+volumes:
+  mysql-data:
+  kb-data:

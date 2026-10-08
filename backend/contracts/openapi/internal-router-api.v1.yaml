@@ -1,0 +1,57 @@
+openapi: 3.1.0
+info:
+  title: eAgent 受管调用出口内部契约
+  version: "1.1.0"
+  description: |
+    P0-3 已落地（进程内形态）: 所有 A2A 出站调用经
+    `src/eagent_gateway/router/client.py::ManagedA2AClient`，业务代码禁止
+    直接创建 A2AClient/A2ACardResolver。
+
+    出站注入的平台上下文头（P1-3 血缘传播，远端 eAgent 入站继承）:
+
+    | Header | 语义 |
+    |---|---|
+    | X-EAgent-Trace-Id | 贯穿一次端到端调用 |
+    | X-EAgent-Invocation-Id | 本次调用（调用方分配，两端账本一致） |
+    | X-EAgent-Root-Task-Id | 根任务 |
+    | X-EAgent-Parent-Invocation-Id | 调用方的 invocation（父子血缘） |
+    | X-EAgent-Workspace-Id | 工作空间 |
+
+    短期凭证（P1-1，配置 Ed25519 私钥后启用）: `Authorization: Bearer <JWT>`
+    （EdDSA，TTL 30s，每请求唯一 jti; claims 绑定 workspace/agent/release/
+    cardDigest/capability/invocation/rootTask/trace）。
+
+    统一出口规则: SSRF 固定 IP、禁重定向、统一超时、响应大小上限、
+    fail-closed（TIMEOUT/DEPENDENCY_ERROR/INSTANCE_UNAVAILABLE，不重试
+    不换地址）。独立 Router 进程为 P2 预留（POST /internal/v1/invocations）。
+servers:
+  - url: /
+paths: {}
+components:
+  responses:
+    PlatformError:
+      description: 平台统一错误（platform-error.v1 契约）
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/PlatformError" }
+  schemas:
+    PlatformError:
+      type: object
+      required: [code, message, traceId]
+      properties:
+        code:
+          type: string
+          pattern: "^[A-Z][A-Z0-9_]{1,63}$"
+        message:
+          type: string
+          maxLength: 512
+        traceId:
+          type: [string, "null"]
+        details:
+          type: array
+          items:
+            type: object
+            required: [field, issue]
+            properties:
+              field: { type: string }
+              issue: { type: string }

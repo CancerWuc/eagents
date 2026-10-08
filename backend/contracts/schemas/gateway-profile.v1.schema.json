@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eagent.dev/contracts/gateway-profile.v1.json",
+  "title": "Gateway Profile v1",
+  "description": "Higress 网关环境（higress-mcp-gateway 01 §5.1/§5.2）。一个 profile 承载一个 Higress 部署实例的配置：higress_ns 为 Higress 资源所在 namespace（形态 A 跨 ns / 形态 B 同 ns 共用），kube_context 选择 kubeconfig context（集群内运行走 in-cluster ServiceAccount 时留空）。",
+  "type": "object",
+  "properties": {
+    "id": { "type": "integer", "minimum": 1 },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "环境名，如 aliyun-dev / corp-internal"
+    },
+    "higress_ns": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "Higress 资源所在 namespace（McpBridge/WasmPlugin/ai-route CM 均写入该 ns）"
+    },
+    "kube_context": {
+      "anyOf": [
+        { "type": "string", "maxLength": 128 },
+        { "type": "null" }
+      ],
+      "description": "kubeconfig context 名；空 = 默认/集群内 in-cluster"
+    },
+    "higress_version": {
+      "anyOf": [
+        { "type": "string", "maxLength": 16 },
+        { "type": "null" }
+      ],
+      "description": "Higress 版本（连通性探测自动回填；适配层按版本分支）"
+    },
+    "enabled": { "type": "boolean" },
+    "created_at": {
+      "anyOf": [{ "type": "string" }, { "type": "null" }]
+    },
+    "updated_at": {
+      "anyOf": [{ "type": "string" }, { "type": "null" }]
+    }
+  },
+  "required": ["id", "name", "higress_ns", "enabled"],
+  "additionalProperties": false
+}

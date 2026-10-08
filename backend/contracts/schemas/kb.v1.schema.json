@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eagent.dev/contracts/kb.v1.json",
+  "title": "Knowledge Base v1",
+  "description": "KB 知识库领域契约（from_llm_wiki/02 §4）：创建/更新 KB 请求体校验（fail-closed，非法 422）。search_config 为治理侧配置，默认值由服务端填充，此处校验显式传入的字段。",
+  "type": "object",
+  "properties": {
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{1,63}$",
+      "description": "工具名域：kb_search_<slug>"
+    },
+    "display_name": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "description": { "type": ["string", "null"], "maxLength": 1024 },
+    "classification": {
+      "type": "string",
+      "enum": ["PUBLIC", "INTERNAL", "CONFIDENTIAL"],
+      "description": "密级（S7）：一期仅 PUBLIC/INTERNAL 两级实际使用"
+    },
+    "owner_app": { "type": ["string", "null"], "maxLength": 64 },
+    "schema_text": { "type": ["string", "null"], "maxLength": 65535 },
+    "purpose_text": { "type": ["string", "null"], "maxLength": 65535 },
+    "embedding_config": { "$ref": "#/$defs/embedding_config" },
+    "chunking_config": { "$ref": "#/$defs/chunking_config" },
+    "search_config": { "$ref": "#/$defs/search_config" }
+  },
+  "required": ["slug", "display_name"],
+  "additionalProperties": false,
+  "$defs": {
+    "embedding_config": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": ["lancedb", "qdrant"],
+          "description": "向量库 Provider（D-2026-08-16-01：一期 lancedb，qdrant 二期预留不拒绝写入）"
+        },
+        "model": { "type": ["string", "null"], "maxLength": 128 },
+        "dimension": { "type": "integer", "minimum": 32, "maximum": 4096 },
+        "endpoint": { "type": ["string", "null"], "maxLength": 512 }
+      },
+      "additionalProperties": false
+    },
+    "chunking_config": {
+      "type": "object",
+      "properties": {
+        "max_tokens": { "type": "integer", "minimum": 64, "maximum": 8192 },
+        "overlap": { "type": "integer", "minimum": 0, "maximum": 512 },
+        "title_hierarchy": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "search_config": {
+      "type": "object",
+      "description": "检索治理配置（D2/D3）：top_k 语义=最终结果窗口/上下文预算",
+      "properties": {
+        "top_k_default": { "type": "integer", "minimum": 1, "maximum": 50 },
+        "top_k_max": { "type": "integer", "minimum": 1, "maximum": 50 },
+        "aggregate_budget_bytes": { "type": "integer", "minimum": 1024 },
+        "snippet_max_bytes": { "type": "integer", "minimum": 256 },
+        "no_hit": {
+          "type": "object",
+          "properties": {
+            "min_results": { "type": "integer", "minimum": 1 },
+            "rrf_floor": { "type": "number", "minimum": 0, "maximum": 1 }
+          },
+          "additionalProperties": false
+        },
+        "read_page_budget_bytes": { "type": "integer", "minimum": 1024 },
+        "graph_quota": {
+          "type": "object",
+          "properties": {
+            "min": { "type": "number", "minimum": 0, "maximum": 1 },
+            "max": { "type": "number", "minimum": 0, "maximum": 1 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

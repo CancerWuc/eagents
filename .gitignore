@@ -1,0 +1,38 @@
+# Local credentials, configuration and runtime data
+.env*
+*.env
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+**/kb_data/
+**/kb_vectors/
+**/data/
+*.db
+*.sqlite*
+*.log
+# Build, dependency and editor files
+**/.venv/
+**/venv/
+**/__pycache__/
+*.py[cod]
+**/node_modules/
+**/.pnpm-store/
+**/dist/
+**/build/
+**/*.egg-info/
+.idea/
+.vscode/
+.DS_Store
+# Existing local PyCharm scaffold (not part of eAgent)
+/main.py
+# Non-core development artifacts
+**/tests/
+**/__tests__/
+**/*.test.*
+**/*.spec.*
+**/scripts/
+**/spikes/
+**/.pytest_cache/

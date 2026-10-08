@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eagent.dev/contracts/gateway-config-export.v1.json",
+  "title": "Gateway Config Export v1",
+  "description": "网关配置导出/导入载体（higress-mcp-gateway 03 T15）。consumer 密钥永不导出（导入侧重新生成并在响应一次性回显）；secretsIncluded=false 时 provider apiTokens 为脱敏占位（***），导入侧拒绝脱敏值。",
+  "type": "object",
+  "properties": {
+    "exportVersion": { "const": 1 },
+    "kind": { "const": "eagent-gateway-config" },
+    "source": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "higressNs": { "type": "string" },
+        "higressVersion": {
+          "anyOf": [{ "type": "string" }, { "type": "null" }]
+        }
+      }
+    },
+    "secretsIncluded": { "type": "boolean" },
+    "mcpServices": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "domain": { "type": "string", "minLength": 1, "maxLength": 255 },
+          "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+          "protocol": { "type": "string" },
+          "registryType": { "type": "string" },
+          "providerConfig": {
+            "type": ["object", "null"],
+            "properties": {
+              "type": { "type": "string" },
+              "protocol": { "type": "string" },
+              "apiUrl": { "type": "string" },
+              "apiTokens": { "type": "array", "items": { "type": "string" } }
+            },
+            "required": ["type", "apiUrl"]
+          }
+        },
+        "required": ["name", "domain"]
+      }
+    },
+    "routes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "matchType": { "type": "string", "enum": ["PRE", "EXACT", "REGEX"] },
+          "matchValue": { "type": "string" },
+          "upstreamName": { "type": "string" },
+          "weight": { "type": "integer" },
+          "authEnabled": { "type": "boolean" },
+          "retryEnabled": { "type": "boolean" },
+          "retryAttempts": { "type": "integer" }
+        },
+        "required": ["name", "upstreamName"]
+      }
+    },
+    "consumers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "routes": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["name"]
+      }
+    }
+  },
+  "required": ["kind"],
+  "additionalProperties": false
+}

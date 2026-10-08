@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eagent.dev/contracts/platform-error.v1.json",
+  "title": "Platform Error v1",
+  "description": "平台统一错误响应结构。所有管理 API 的非 2xx 响应必须符合本契约：code 取自错误码表（from_nekiro/07），message 为固定安全文案，traceId 用于问题定位。details 仅用于 VALIDATION_ERROR 的字段级提示，不得包含原始输入值。",
+  "type": "object",
+  "properties": {
+    "code": { "$ref": "https://eagent.dev/contracts/common.v1.json#/$defs/errorCode" },
+    "message": { "$ref": "https://eagent.dev/contracts/common.v1.json#/$defs/safeMessage" },
+    "traceId": {
+      "anyOf": [
+        { "$ref": "https://eagent.dev/contracts/common.v1.json#/$defs/id" },
+        { "type": "null" }
+      ]
+    },
+    "details": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "field": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "issue": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "required": ["field", "issue"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["code", "message", "traceId"],
+  "additionalProperties": false
+}

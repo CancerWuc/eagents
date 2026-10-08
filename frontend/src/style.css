@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand: #C22128;
+  --color-brand-hover: #A61B21;
+  --color-brand-light: #FCECEC;
+  --color-brand-lighter: #FDF5F5;
+  --color-canvas: #F5F6F8;
+  --color-line: #E5E6EB;
+  --color-t1: #1F2329;
+  --color-t2: #646A73;
+  --color-t3: #8F959E;
+  --color-up: #3370FF;
+  --color-up-light: #E8F3FF;
+  --color-warn: #FF8800;
+  --color-warn-light: #FFF3E5;
+  --font-sans: -apple-system, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+html, body, #app { height: 100%; }
+body { @apply bg-canvas text-t1 text-sm antialiased; }
+
+/* 设计稿通用组件类（少量 util 组合，保持模板可读） */
+.btn { @apply inline-flex items-center gap-1.5 h-9 px-4 rounded-md text-sm font-medium cursor-pointer border border-transparent whitespace-nowrap transition-colors disabled:opacity-45 disabled:cursor-not-allowed; }
+.btn-primary { @apply bg-brand text-white hover:bg-brand-hover; }
+.btn-ghost { @apply bg-white text-t1 border-line hover:border-brand hover:text-brand; }
+.btn-text { @apply bg-transparent text-brand hover:text-brand-hover h-7 px-1.5; }
+.btn-sm { @apply h-7.5 px-3 text-[13px]; }
+
+.badge { @apply inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded whitespace-nowrap; }
+.badge-ok { @apply bg-up-light text-up; }
+.badge-warn { @apply bg-warn-light text-warn; }
+.badge-err { @apply bg-brand-light text-brand; }
+.badge-gray { @apply bg-canvas text-t3; }
+.badge-brand { @apply bg-brand-light text-brand; }
+
+.card { @apply bg-white rounded-xl shadow-[0_2px_8px_rgba(31,35,41,0.06)] p-6 mb-6; }
+.input { @apply w-full border border-line rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-brand focus:ring-2 focus:ring-brand-light; }
+.tbl { @apply w-full border-collapse; }
+.tbl th { @apply text-left text-[13px] font-medium text-t2 px-3 py-2.5 border-b border-line whitespace-nowrap; }
+.tbl td { @apply px-3 py-3.5 border-b border-line text-sm; }
+.tbl tr:last-child td { @apply border-b-0; }
+.tbl tbody tr:hover td { @apply bg-[#FAFBFC]; }
+.mono { @apply font-mono text-[13px] text-t2; }

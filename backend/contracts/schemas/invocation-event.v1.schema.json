@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eagent.dev/contracts/invocation-event.v1.json",
+  "title": "Invocation Event v1",
+  "description": "append-only 调用事件（P0-4 落地，字段与 eag_invocation_event 对齐）。只存血缘与状态元数据，不存输入输出与密钥。",
+  "type": "object",
+  "properties": {
+    "eventId": { "$ref": "https://eagent.dev/contracts/common.v1.json#/$defs/id" },
+    "invocationId": { "$ref": "https://eagent.dev/contracts/common.v1.json#/$defs/id" },
+    "traceId": { "$ref": "https://eagent.dev/contracts/common.v1.json#/$defs/id" },
+    "rootTaskId": { "$ref": "https://eagent.dev/contracts/common.v1.json#/$defs/id" },
+    "parentInvocationId": {
+      "anyOf": [
+        { "$ref": "https://eagent.dev/contracts/common.v1.json#/$defs/id" },
+        { "type": "null" }
+      ]
+    },
+    "workspaceId": {
+      "anyOf": [
+        { "$ref": "https://eagent.dev/contracts/common.v1.json#/$defs/id" },
+        { "type": "null" }
+      ]
+    },
+    "masterId": {
+      "anyOf": [
+        { "$ref": "https://eagent.dev/contracts/common.v1.json#/$defs/id" },
+        { "type": "null" }
+      ]
+    },
+    "serviceId": {
+      "anyOf": [
+        { "$ref": "https://eagent.dev/contracts/common.v1.json#/$defs/id" },
+        { "type": "null" }
+      ]
+    },
+    "releaseId": {
+      "anyOf": [
+        { "$ref": "https://eagent.dev/contracts/common.v1.json#/$defs/id" },
+        { "type": "null" }
+      ]
+    },
+    "eventType": {
+      "type": "string",
+      "enum": [
+        "INVOCATION_STARTED",
+        "AGENT_CALL_STARTED",
+        "AGENT_CALL_FINISHED",
+        "INVOCATION_FINISHED"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 24
+    },
+    "errorCode": {
+      "anyOf": [
+        { "$ref": "https://eagent.dev/contracts/common.v1.json#/$defs/errorCode" },
+        { "type": "null" }
+      ]
+    },
+    "startedAt": { "$ref": "https://eagent.dev/contracts/common.v1.json#/$defs/timestamp" },
+    "finishedAt": {
+      "anyOf": [
+        { "$ref": "https://eagent.dev/contracts/common.v1.json#/$defs/timestamp" },
+        { "type": "null" }
+      ]
+    }
+  },
+  "required": [
+    "eventId",
+    "invocationId",
+    "traceId",
+    "rootTaskId",
+    "eventType",
+    "status",
+    "startedAt"
+  ],
+  "additionalProperties": false
+}

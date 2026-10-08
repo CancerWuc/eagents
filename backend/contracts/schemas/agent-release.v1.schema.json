@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eagent.dev/contracts/agent-release.v1.json",
+  "title": "Agent Release v1",
+  "description": "不可变 Agent 发布版本（P0-2 落地，字段与 eag_agent_release 对齐）。发布后仅允许状态流转 DRAFT→PUBLISHED→SUSPENDED/REVOKED，其余字段不可变。",
+  "type": "object",
+  "properties": {
+    "releaseId": { "$ref": "https://eagent.dev/contracts/common.v1.json#/$defs/id" },
+    "serviceId": { "$ref": "https://eagent.dev/contracts/common.v1.json#/$defs/id" },
+    "agentVersion": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "cardRevisionId": { "$ref": "https://eagent.dev/contracts/common.v1.json#/$defs/id" },
+    "cardDigest": { "$ref": "https://eagent.dev/contracts/common.v1.json#/$defs/digest" },
+    "endpoint": {
+      "type": "string",
+      "pattern": "^https?://",
+      "maxLength": 512
+    },
+    "state": {
+      "type": "string",
+      "enum": ["DRAFT", "PUBLISHED", "SUSPENDED", "REVOKED"]
+    },
+    "createdBy": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "createdAt": { "$ref": "https://eagent.dev/contracts/common.v1.json#/$defs/timestamp" },
+    "publishedAt": {
+      "anyOf": [
+        { "$ref": "https://eagent.dev/contracts/common.v1.json#/$defs/timestamp" },
+        { "type": "null" }
+      ]
+    },
+    "suspendedAt": {
+      "anyOf": [
+        { "$ref": "https://eagent.dev/contracts/common.v1.json#/$defs/timestamp" },
+        { "type": "null" }
+      ]
+    },
+    "revokedAt": {
+      "anyOf": [
+        { "$ref": "https://eagent.dev/contracts/common.v1.json#/$defs/timestamp" },
+        { "type": "null" }
+      ]
+    }
+  },
+  "required": [
+    "releaseId",
+    "serviceId",
+    "agentVersion",
+    "cardRevisionId",
+    "cardDigest",
+    "endpoint",
+    "state",
+    "createdBy",
+    "createdAt"
+  ],
+  "additionalProperties": false
+}

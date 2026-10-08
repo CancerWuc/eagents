@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eagent.dev/contracts/kb-plan-proposal.v2.json",
+  "title": "KB Ingest Plan Proposal v2",
+  "description": "入库规划 proposal_json 完整契约（from_llm_wiki/04 §7 权威定义，plan schema v2 含 depends_on/D4）。planner 产出与 confirm 勾选校验共用；非法即 422（fail-closed）。",
+  "type": "object",
+  "properties": {
+    "kb_id": { "type": "string", "pattern": "^kb_[0-9a-f]+$" },
+    "base_rev": { "type": ["string", "null"], "maxLength": 64 },
+    "trigger": { "type": "string", "enum": ["UPLOAD"] },
+    "sources": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^src_[0-9a-f]+$" },
+      "minItems": 1
+    },
+    "placement": {
+      "type": "object",
+      "properties": {
+        "proposed_dir": { "type": "string", "pattern": "^wiki/[a-z0-9_\\-./]*$|^wiki/$" },
+        "strategy": {
+          "type": "string",
+          "enum": [
+            "NEW_PAGE_AND_UPDATE_INDEX",
+            "NEW_PAGE_ONLY",
+            "MERGE_INTO_EXISTING",
+            "SPLIT_MULTI_PAGES",
+            "UPDATE_EXISTING_ONLY",
+            "REVIEW_ONLY"
+          ]
+        },
+        "rationale": { "type": "string", "minLength": 1 }
+      },
+      "required": ["proposed_dir", "strategy", "rationale"],
+      "additionalProperties": false
+    },
+    "changes": { "type": "array", "items": { "$ref": "#/$defs/change" } },
+    "lint_after": { "type": "array", "items": { "type": "string" } },
+    "confidence": { "type": "string", "enum": ["high", "medium", "low"] },
+    "alternatives": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "strategy": { "type": "string" },
+          "rationale": { "type": "string" },
+          "tradeoff": { "type": "string" }
+        },
+        "required": ["strategy", "rationale", "tradeoff"],
+        "additionalProperties": false
+      }
+    },
+    "risk": { "type": ["string", "null"] },
+    "rollback": { "type": ["string", "null"] }
+  },
+  "required": ["kb_id", "trigger", "sources", "placement", "changes", "confidence"],
+  "additionalProperties": false,
+  "$defs": {
+    "change": {
+      "type": "object",
+      "properties": {
+        "action_id": {
+          "type": "string",
+          "pattern": "^(create|update|relink|update_index_log):\\S{1,200}$",
+          "description": "稳定动作标识 <action>:<path>（confirm 勾选与 depends_on 引用）"
+        },
+        "action": {
+          "type": "string",
+          "enum": ["CREATE_PAGE", "UPDATE_PAGE", "RELINK", "UPDATE_INDEX_LOG"]
+        },
+        "path": { "type": ["string", "null"], "pattern": "^wiki/\\S{1,200}\\.md$" },
+        "title": { "type": ["string", "null"], "maxLength": 256 },
+        "sources": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^src_[0-9a-f]+$" }
+        },
+        "target": { "type": ["string", "null"], "pattern": "^wiki/\\S{1,200}\\.md$" },
+        "targets": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "from": { "type": ["string", "null"], "maxLength": 256 },
+        "to": { "type": ["string", "null"], "maxLength": 256 },
+        "depends_on": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "前置动作 action_id 列表（D4）；须构成 DAG（服务端校验无环）"
+        },
+        "merge_from": { "type": "array", "items": { "type": "string" } },
+        "reason": { "type": ["string", "null"] },
+        "effect": { "type": ["string", "null"] },
+        "expected_effect": { "type": ["string", "null"] },
+        "selected": { "type": "boolean", "description": "confirm 时回填的执行结果状态（APPLIED/SKIPPED 见 result）" },
+        "result": {
+          "type": ["object", "null"],
+          "description": "编译执行后回填：{status: APPLIED|SKIPPED, detail, rev}",
+          "properties": {
+            "status": { "type": "string", "enum": ["APPLIED", "SKIPPED"] },
+            "detail": { "type": "string" },
+            "rev": { "type": ["string", "null"] }
+          },
+          "required": ["status", "detail"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["action_id", "action", "depends_on"],
+      "additionalProperties": false
+    }
+  }
+}

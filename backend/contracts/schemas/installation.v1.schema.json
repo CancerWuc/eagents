@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eagent.dev/contracts/installation.v1.json",
+  "title": "Installation v1",
+  "description": "工作空间对某个 Release 的显式安装（P0-2 落地，字段与 eag_installation 对齐）。运行时只允许调用 ENABLED 安装对应的 Release。",
+  "type": "object",
+  "properties": {
+    "installationId": { "$ref": "https://eagent.dev/contracts/common.v1.json#/$defs/id" },
+    "workspaceId": { "$ref": "https://eagent.dev/contracts/common.v1.json#/$defs/id" },
+    "serviceId": { "$ref": "https://eagent.dev/contracts/common.v1.json#/$defs/id" },
+    "releaseId": { "$ref": "https://eagent.dev/contracts/common.v1.json#/$defs/id" },
+    "status": {
+      "type": "string",
+      "enum": ["ENABLED", "DISABLED", "UNINSTALLED"]
+    },
+    "acceptedPermissions": {
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        { "type": "null" }
+      ],
+      "description": "安装时显式接受的权限，如 [\"invoke\"]"
+    },
+    "createdAt": { "$ref": "https://eagent.dev/contracts/common.v1.json#/$defs/timestamp" },
+    "updatedAt": { "$ref": "https://eagent.dev/contracts/common.v1.json#/$defs/timestamp" },
+    "uninstalledAt": {
+      "anyOf": [
+        { "$ref": "https://eagent.dev/contracts/common.v1.json#/$defs/timestamp" },
+        { "type": "null" }
+      ]
+    }
+  },
+  "required": [
+    "installationId",
+    "workspaceId",
+    "serviceId",
+    "releaseId",
+    "status",
+    "createdAt",
+    "updatedAt"
+  ],
+  "additionalProperties": false
+}
