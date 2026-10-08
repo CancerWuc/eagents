@@ -316,7 +316,7 @@ def create_app() -> FastAPI:
     # fail-secure: strict 模式未配管理令牌直接拒绝启动
     assert_production_auth_configured()
     app = FastAPI(
-        title="eAgent A2A Gateway", version="0.1.0", lifespan=lifespan,
+        title="eAgent GitHub A2A Gateway", version="0.1.0", lifespan=lifespan,
     )
     # 运行期挂载注册表需要宿主应用引用。注意静态资源 catch-all 在本函数末尾才
     # 挂载，而 A2A 挂载发生在 lifespan（更晚），mounts 会把它插到 catch-all 之前。

@@ -1,6 +1,7 @@
 <script setup>
 // 登录页（admin-auth 01）：Pluto 员工登录跳转 + admin 本地表单（跟随开关隐藏）
 import { onMounted, ref } from 'vue'
+import { config } from '../config.js'
 import {
   consoleCallback,
   fetchAuthProviders,
@@ -79,7 +80,7 @@ onMounted(async () => {
 <template>
   <div class="min-h-screen flex items-center justify-center bg-canvas px-4">
     <div class="card w-full max-w-md">
-      <h1 class="text-lg font-semibold mb-1">eAgent 管理后台登录</h1>
+      <h1 class="text-lg font-semibold mb-1">{{ config.appName }} 管理后台登录</h1>
       <p class="text-t3 text-xs mb-5">员工请使用 Pluto 账号登录；管理员可走本地账号</p>
 
       <div v-if="error" class="badge-err badge w-full justify-center mb-4 px-3 py-2">{{ error }}</div>

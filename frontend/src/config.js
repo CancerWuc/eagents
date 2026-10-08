@@ -1,7 +1,7 @@
 // 启动期配置强校验（from_nekiro/12 §S5 / E3）
 // 缺失/非法配置在模块加载时立即抛错（fail-fast），不允许带病启动。
 const apiBase = import.meta.env.VITE_API_BASE ?? ''
-const appName = import.meta.env.VITE_APP_NAME || 'eAgent 管理台'
+const appName = import.meta.env.VITE_APP_NAME || 'eAgent GitHub'
 
 const problems = []
 if (typeof apiBase !== 'string') {

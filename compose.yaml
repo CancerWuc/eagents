@@ -1,44 +1,71 @@
-name: eagents-core
+name: eagents-github
 services:
-  mysql:
-    image: mysql:5.7
+  mysql-github:
+    container_name: eagents-github-mysql
+    image: eagents-github-mysql:5.7
+    build:
+      context: ./backend
+      dockerfile_inline: |
+        FROM mysql:5.7
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: eagent
-      MYSQL_USER: eagent
+      MYSQL_DATABASE: eagent_github
+      MYSQL_USER: eagent_github
       MYSQL_PASSWORD: ${EAGENT_DB_PASSWORD:?Set EAGENT_DB_PASSWORD}
     volumes:
-      - mysql-data:/var/lib/mysql
-      - ./backend/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - mysql-data-github:/var/lib/mysql
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$$MYSQL_USER -p$$MYSQL_PASSWORD --silent"]
       interval: 3s
       timeout: 3s
       retries: 30
-  backend:
+  backend-github:
+    container_name: eagents-github-backend
+    image: eagents-github-backend:local
     build: ./backend
     env_file: ./backend/.env.local
     environment:
-      EAGENT_DB_HOST: mysql
+      EAGENT_DB_HOST: mysql-github
       EAGENT_DB_PORT: "3306"
-      EAGENT_DB_USER: eagent
-      EAGENT_DB_NAME: eagent
+      EAGENT_DB_USER: eagent_github
+      EAGENT_DB_NAME: eagent_github
       EAGENT_AUTH_MODE: strict
+      EAGENT_PERF_WORKER_EMBEDDED: "1"
     ports:
-      - "127.0.0.1:${EAGENT_BACKEND_PORT:-8188}:8080"
+      - "127.0.0.1:${EAGENT_BACKEND_PORT:-8189}:8080"
     volumes:
-      - kb-data:/app/kb_data
+      - kb-data-github:/app/kb_data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
     depends_on:
-      mysql:
+      mysql-github:
         condition: service_healthy
-  frontend:
+  frontend-github:
+    container_name: eagents-github-frontend
+    image: eagents-github-frontend:local
     build: ./frontend
     environment:
-      EAGENT_BACKEND_UPSTREAM: backend:8080
+      EAGENT_BACKEND_UPSTREAM: backend-github:8080
     ports:
-      - "127.0.0.1:${EAGENT_FRONTEND_PORT:-5173}:80"
+      - "127.0.0.1:${EAGENT_FRONTEND_PORT:-5174}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
     depends_on:
-      - backend
+      backend-github:
+        condition: service_healthy
 volumes:
-  mysql-data:
-  kb-data:
+  mysql-data-github:
+    name: eagents-github-mysql-data
+  kb-data-github:
+    name: eagents-github-kb-data
+networks:
+  default:
+    name: eagents-github-network

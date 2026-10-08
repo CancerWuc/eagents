@@ -176,7 +176,7 @@ function confirmResolve(ok) {
         <div class="w-8 h-8 rounded-lg bg-brand flex items-center justify-center">
           <svg class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-4z"/><path d="M9 12l2 2 4-4"/></svg>
         </div>
-        <span class="text-[17px] font-semibold text-brand">eAgent 网关</span>
+        <span class="text-[17px] font-semibold text-brand">{{ appName }}</span>
       </div>
       <nav class="flex-1 p-3 overflow-y-auto">
         <div v-if="canViewPage('multi')" :class="['flex items-center gap-3 h-11 px-3 rounded-lg cursor-pointer font-medium mb-0.5 border transition-colors',

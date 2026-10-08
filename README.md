@@ -1,4 +1,4 @@
-# eAgent
+# eAgent GitHub
 
 eAgent 的核心代码重建基线：Vue 管理台、Python/FastAPI 服务注册与治理、
 AgentScope ReAct 总控、A2A 1.0、HiAgent 接入、知识库、权限与运行审计。
@@ -24,10 +24,31 @@ AgentScope ReAct 总控、A2A 1.0、HiAgent 接入、知识库、权限与运行
 docker compose --env-file backend/.env.local up -d --build
 ```
 
-管理台默认为 `http://localhost:5173`，使用 `admin` 和自行设置的
-`ADMIN_PASSWORD` 登录；后端健康检查为 `http://localhost:8188/healthz`。
+管理台默认为 `http://localhost:5174`，使用 `admin` 和自行设置的
+`ADMIN_PASSWORD` 登录；后端健康检查为 `http://localhost:8189/healthz`。
 已有本地服务占用端口时，修改配置中的 `EAGENT_FRONTEND_PORT` 和
 `EAGENT_BACKEND_PORT`，同时调整 `EAGENT_PUBLIC_URL`。
+
+Docker Compose 项目名为 `eagents-github`，容器为 `eagents-github-mysql`、
+`eagents-github-backend`、`eagents-github-frontend`；应用镜像为
+`eagents-github-backend:local`、`eagents-github-frontend:local` 和
+`eagents-github-mysql:5.7`，网络为 `eagents-github-network`。
+MySQL 镜像基于官方 `mysql:5.7` 构建，使用独立的 GitHub 镜像名。
+数据卷为 `eagents-github-mysql-data`、`eagents-github-kb-data`，数据库与账号
+均为 `eagent_github`，与旧版独立。数据库表结构由后端首启自举并执行迁移，
+不挂载含固定旧库名的 `schema.sql` 到 MySQL 初始化目录。
+前端标题、登录页和导航栏均带 GitHub 标识；代码模块名和 API 协议字段保持兼容。
+Compose 启用内嵌性能测试 worker，并等待后端健康后启动前端。
+
+查看状态与停止当前 GitHub 部署（保留数据卷）：
+
+```sh
+docker compose --env-file backend/.env.local ps
+docker compose --env-file backend/.env.local down
+```
+
+`backend/.env.local` 被 Git 忽略，仅保存本机凭据。未配置模型、HiAgent、
+Pluto 或 Kubernetes/Higress 时，相应外部功能不可完整使用。
 
 也可在 `backend/` 内通过 `pip install -r requirements.txt` 安装运行依赖，
 将配置提供为环境变量后执行 `python -m eagent_gateway.main`。
