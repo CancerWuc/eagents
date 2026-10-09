@@ -28,11 +28,7 @@
 .DS_Store
 # Existing local PyCharm scaffold (not part of eAgent)
 /main.py
-# Non-core development artifacts
-**/tests/
-**/__tests__/
-**/*.test.*
-**/*.spec.*
+# Non-core development artifacts (regression tests are tracked)
 **/scripts/
 **/spikes/
 **/.pytest_cache/

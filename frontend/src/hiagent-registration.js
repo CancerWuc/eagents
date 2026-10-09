@@ -1,3 +1,13 @@
+// An unchanged enum can contain non-string values or be empty; retain it exactly.
+function parameterEnum(row, requireMatchingType = false) {
+  if ((!requireMatchingType || row.originalProperty?.type === row.type)
+    && row.options === row.originalOptions && row.originalProperty?.enum) return row.originalProperty.enum
+  const options = [...new Set((row.options || '').split(/[,，\n]/).map(value => value.trim()).filter(Boolean))]
+  return options.length ? options : undefined
+}
+
+export function parameterChoices(row) { return parameterEnum(row) || [] }
+
 // Convert the registration form into the existing backend contract.
 export function buildHiagentRegistration(rows, query, originalSchema) {
   const properties = Object.create(null)
@@ -23,12 +33,10 @@ export function buildHiagentRegistration(rows, query, originalSchema) {
     const property = { ...(row.originalProperty?.type === row.type ? row.originalProperty : {}), type: row.type }
     delete property.description
     if (row.description.trim()) property.description = row.description.trim()
-    const options = row.type === 'string'
-      ? [...new Set((row.options || '').split(/[,，\n]/).map(v => v.trim()).filter(Boolean))] : []
     if (row.type === 'string') {
       delete property.enum
-      if (row.originalProperty?.type === row.type && row.options === row.originalOptions && row.originalProperty.enum) property.enum = row.originalProperty.enum
-      else if (options.length) property.enum = options
+      const options = parameterEnum(row, true)
+      if (options) property.enum = options
     }
     properties[name] = property
     if (row.required) required.push(name)

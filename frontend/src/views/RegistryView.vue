@@ -3,7 +3,9 @@ import HiAgentRunDialog from '../components/HiAgentRunDialog.vue'
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { api } from '../api.js'
 import { config } from '../config.js'
-import { buildHiagentRegistration, restoreHiagentRegistration } from '../hiagent-registration.js'
+import { buildHiagentRegistration, restoreHiagentRegistration, parameterChoices } from '../hiagent-registration.js'
+import { fmtDateTime as fmtTime } from '../format.js'
+import { slugValidationError, httpUrlError } from '../form-rules.js'
 import { randomUuid } from '../uuid.js'
 import Pagination from '../components/Pagination.vue'
 import { useServerPagination, watchPagination } from '../pagination.js'
@@ -28,8 +30,9 @@ watchPagination(servicesPager, [tile, enabledFilter])
 
 // --- 注册弹窗状态 ---
 const showForm = ref(false)
-const form = ref({ slug: '', displayName: '', agentCardUrl: '', tags: '', outboundApiKey: '', description: '', baseUrl: '', appKey: '' })
-const formSource = ref('A2A')    // A2A | HIAGENT（注册来源，hiagent-integration/01）
+const emptyForm = () => ({ slug: '', displayName: '', agentCardUrl: '', tags: '', outboundApiKey: '', description: '', baseUrl: '', appKey: '' })
+const form = ref(emptyForm())
+const formSource = ref('A2A')    // 注册来源：A2A | HIAGENT
 const skills = ref([])           // HIAGENT 生成式 Card 素材 [{name, description}]
 const parameterRows = ref([])
 const testQuery = ref('你好')
@@ -72,7 +75,7 @@ const credTarget = ref(null)
 const credApiKey = ref('')
 const credBusy = ref(false)
 
-// --- HIAGENT 来源辅助（hiagent-integration/01）---
+// --- HIAGENT 来源辅助 ---
 const a2aBase = config.apiBase || window.location.origin
 const isHiagent = (s) => s.source_type === 'HIAGENT'
 // HIAGENT 行的对外地址是平台挂载端点（Card 由平台生成），A2A 行才是远端 well-known
@@ -93,24 +96,16 @@ async function load() {
 onMounted(load)
 
 // --- 注册表单相关 ---
-const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,63}$/
 const slugError = computed(() => {
   const v = form.value.slug.trim()
   if (!v) return ''
-  if (!SLUG_RE.test(v)) return '2–64 位，小写字母或数字开头，仅含小写字母、数字与短横线'
+  const error = slugValidationError(v)
+  if (error) return error
   if (services.value.some(s => s.slug === v && s.service_id !== editTarget.value?.service_id)) return '该标识已被占用'
   return ''
 })
-const urlError = computed(() => {
-  const v = form.value.agentCardUrl.trim()
-  if (!v) return ''
-  return /^https?:\/\/.+/i.test(v) ? '' : '需以 http:// 或 https:// 开头'
-})
-const baseUrlError = computed(() => {
-  const v = form.value.baseUrl.trim()
-  if (!v) return ''
-  return /^https?:\/\/.+/i.test(v) ? '' : '需以 http:// 或 https:// 开头'
-})
+const urlError = computed(() => httpUrlError(form.value.agentCardUrl))
+const baseUrlError = computed(() => httpUrlError(form.value.baseUrl))
 const formValid = computed(() => {
   if (editLoading.value || editError.value) return false
   if (!form.value.slug.trim() || slugError.value) return false
@@ -125,11 +120,6 @@ const formValid = computed(() => {
 function addParameter() {
   parameterRows.value.push({ id: randomUuid(), name: '', type: 'string', required: true, description: '', options: '', testValue: '' })
 }
-function parameterChoices(row) {
-  if (row.options === row.originalOptions && row.originalProperty?.enum) return row.originalProperty.enum
-  return [...new Set(row.options.split(/[,，\n]/).map(value => value.trim()).filter(Boolean))]
-}
-
 function addSkill() { skills.value.push({ name: '', description: '' }) }
 function removeSkill(i) { skills.value.splice(i, 1) }
 
@@ -141,7 +131,7 @@ function openForm() {
   credentialConfigured.value = false
   clearCredential.value = false
   originalSchema.value = null
-  form.value = { slug: '', displayName: '', agentCardUrl: '', tags: '', outboundApiKey: '', description: '', baseUrl: '', appKey: '' }
+  form.value = emptyForm()
   formSource.value = 'A2A'
   skills.value = []
   parameterRows.value = []
@@ -424,10 +414,6 @@ const COMPAT_META = {
 }
 const compat = (c) => COMPAT_META[c] || { text: c || '未知', cls: 'badge badge-gray' }
 
-const fmtTime = (t) => (t ? String(t).replace('T', ' ').slice(0, 19) : '—')
-
-const filtered = computed(() => services.value)
-
 const dirty = computed(() =>
   !!search.value.trim() || tile.value !== 'all' || enabledFilter.value !== 'all')
 
@@ -591,7 +577,7 @@ onBeforeUnmount(() => {
             </template>
 
             <template v-else>
-            <tr v-for="s in filtered" :key="s.service_id" class="align-top hover:bg-canvas/50 transition-colors group">
+            <tr v-for="s in services" :key="s.service_id" class="align-top hover:bg-canvas/50 transition-colors group">
               <!-- 服务：名称 / 标识 / 来源 / 标签 / 地址 -->
 
               <td class="!pl-5">
@@ -672,7 +658,7 @@ onBeforeUnmount(() => {
               </td>
             </tr>
 
-            <tr v-if="!filtered.length">
+            <tr v-if="!services.length">
               <td colspan="5" class="py-12 text-center">
                 <div class="flex flex-col items-center">
                   <div class="w-12 h-12 rounded-full bg-canvas text-t3 flex items-center justify-center mb-3">

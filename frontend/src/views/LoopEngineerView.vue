@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { api } from '../api.js'
+import { fmtDateTime } from '../format.js'
 import { confirmAction, promptText } from '../ui.js'
 import { success } from '../notify.js'
 
@@ -248,7 +249,6 @@ async function rejectCandidate() {
   finally { reviewBusy.value = false }
 }
 
-const fmtTime = (t) => (t || '').replace('T', ' ').slice(0, 19)
 const STATUS_TEXT = { RUNNING: '进行中', COMPLETED: '已完成', FAILED: '失败' }
 const statusClass = (s) => ({
   RUNNING: 'badge badge-warn', COMPLETED: 'badge badge-ok', FAILED: 'badge badge-err',
@@ -301,7 +301,7 @@ const statusClass = (s) => ({
             <td class="font-semibold">{{ d.name }}</td>
             <td class="mono">v{{ d.version_no }}</td>
             <td><span class="badge badge-ok">{{ d.status }}</span></td>
-            <td class="mono">{{ fmtTime(d.created_at) }}</td>
+            <td class="mono">{{ fmtDateTime(d.created_at, '') }}</td>
             <td>
               <div class="flex gap-1.5">
                 <button class="btn btn-text" @click="openDataset(d)">打开用例</button>
@@ -418,8 +418,8 @@ const statusClass = (s) => ({
               <span v-else-if="o.recommendation" class="badge badge-gray">{{ o.recommendation }}</span>
               <span v-else class="text-t3">—</span>
             </td>
-            <td class="mono text-[12px]">{{ fmtTime(o.created_at) }}</td>
-            <td class="mono text-[12px]">{{ fmtTime(o.finished_at) || '—' }}</td>
+            <td class="mono text-[12px]">{{ fmtDateTime(o.created_at, '') }}</td>
+            <td class="mono text-[12px]">{{ fmtDateTime(o.finished_at, '') || '—' }}</td>
             <td><button class="btn btn-text" :disabled="o.status === 'RUNNING'" @click="openOptimization(o)">查看对比</button></td>
           </tr>
           <tr v-if="!optimizations.length"><td colspan="7" class="text-t3">还没有优化任务。打开一个测试集后点右上角「触发优化」</td></tr>

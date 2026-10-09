@@ -12,6 +12,7 @@ state 防 CSRF：无 Redis 的无状态实现——state = 过期时间戳 + HMA
 （密钥取 pluto secret，未配置时回退 admin token），回调时验签 + 查过期。
 错误统一 platform-error.v1；token/密钥不入日志。
 """
+from contextlib import closing
 import hashlib
 import hmac
 import time
@@ -23,7 +24,6 @@ from ..config import settings
 from ..errors import (
     DependencyError,
     ForbiddenError,
-    UnauthenticatedError,
     ValidationError,
 )
 from ..persistence.db import Database
@@ -108,16 +108,13 @@ async def console_callback(body: ConsoleCallbackIn) -> dict:
         profile["badge_id"] = await pluto_oauth.lookup_badge_id_by_wecom_id(
             profile["wecom_id"],
         )
-    db = Database()
-    try:
+    with closing(Database()) as db:
         try:
             user = console_auth.upsert_console_user(db, profile, userinfo)
         except ValueError as exc:
             raise ValidationError(str(exc)) from exc
         raw_token = console_auth.create_console_session(db, user, token_response)
         roles = console_auth.user_roles(db, user["user_id"])
-    finally:
-        db.close()
     return {
         "token": raw_token,
         "userId": user["user_id"],
@@ -128,24 +125,18 @@ async def console_callback(body: ConsoleCallbackIn) -> dict:
 
 @router.post("/admin/console/logout")
 async def console_logout(request: Request) -> dict:
-    db = Database()
-    try:
+    with closing(Database()) as db:
         removed = console_auth.logout(db, console_auth.bearer_token(request))
-    finally:
-        db.close()
     return {"logged_out": bool(removed)}
 
 
 @router.post("/admin/auth/login")
 async def admin_login(body: AdminLoginIn, request: Request) -> dict:
-    db = Database()
-    try:
+    with closing(Database()) as db:
         raw_token = console_auth.admin_login(
             db, body.username, body.password,
             ip=console_auth.client_ip(request),
         )
-    finally:
-        db.close()
     return {
         "token": raw_token,
         "username": body.username,
@@ -157,35 +148,26 @@ async def admin_login(body: AdminLoginIn, request: Request) -> dict:
 async def auth_providers() -> dict:
     """登录方式探测（公开，供登录页一次请求渲染）：
     pluto=Pluto 员工登录是否可用；local=本地账号登录开关。"""
-    db = Database()
-    try:
+    with closing(Database()) as db:
         return {
             "pluto": pluto_oauth.pluto_configured(),
             "local_login": console_auth.get_local_login_enabled(db),
         }
-    finally:
-        db.close()
 
 
 @router.get("/admin/auth/local-login")
 async def read_local_login() -> dict:
-    db = Database()
-    try:
+    with closing(Database()) as db:
         return {"enabled": console_auth.get_local_login_enabled(db)}
-    finally:
-        db.close()
 
 
 @router.put("/admin/auth/local-login")
 async def write_local_login(
     body: LocalLoginIn, request: Request,
 ) -> dict:
-    db = Database()
-    try:
+    with closing(Database()) as db:
         ctx = console_auth.auth_context_from_request(db, request)
         if ctx is None or not ctx.is_admin():
             raise ForbiddenError("仅管理员可修改本地登录开关")
         console_auth.set_local_login_enabled(db, body.enabled)
         return {"enabled": console_auth.get_local_login_enabled(db)}
-    finally:
-        db.close()

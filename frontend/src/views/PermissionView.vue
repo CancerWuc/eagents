@@ -4,6 +4,8 @@ import { api } from '../api.js'
 import { promptText, confirmAction } from '../ui.js'
 import { getSession } from '../auth.js'
 import { success } from '../notify.js'
+import { fmtDateTime as fmtTime } from '../format.js'
+import { activeUserCandidates } from '../permission-users.js'
 
 import Pagination from '../components/Pagination.vue'
 import { useServerPagination } from '../pagination.js'
@@ -13,7 +15,7 @@ const err = ref('')
 const groups = ref([])
 const services = ref([])
 const subTab = ref('groups')
-// 用户 Tab（permission-control v1）：登录用户列表 + 角色/状态管理
+// 用户 Tab：登录用户列表 + 角色/状态管理
 const adminUsers = ref([])
 const usersLoading = ref(false)
 const usersErr = ref('')
@@ -23,7 +25,7 @@ const me = session.userId || ''
 const expandedUser = ref('')      // 行展开：正在查看权限明细的工号
 const userDetail = ref(null)      // 权限明细（组/直授）
 const detailLoading = ref(false)
-// 编辑态: group_id -> {members: 'a,b', serviceIds: Set}
+// 当前用户组编辑状态：{ gid, name, members: string[], serviceIds: Set }。
 const editing = ref({})
 const userGrant = ref({ user: '', serviceIds: new Set() })
 const grantSaved = ref('')       // 服务端快照指纹，用于判断未保存修改
@@ -75,7 +77,7 @@ async function load() {
 }
 onMounted(load)
 
-// ---- 用户 Tab（permission-control v1）----
+// ---- 用户 Tab ----
 async function loadUsers() {
   usersLoading.value = true
   usersErr.value = ''
@@ -155,9 +157,6 @@ async function importDirectoryUser(u) {
   } finally {
     importingUser.value = ''
   }
-}
-function fmtTime(t) {
-  return t ? String(t).replace('T', ' ').slice(0, 19) : '—'
 }
 async function toggleAdminRole(u) {
   const grant = !u.isAdmin
@@ -299,19 +298,9 @@ const memberQuery = ref('')
 const USER_RE = /^[A-Za-z0-9._@-]{1,64}$/
 
 /** 候选 = 候选池 - 已选，按输入过滤。 */
-const memberCandidates = computed(() => {
-  const q = memberQuery.value.trim().toLowerCase()
-  const picked = new Set(editing.value.members || [])
-  return adminUsers.value
-    .filter(u => u.status === 'active')
-    .filter(u => !picked.has(u.userId))
-    .filter(u => !q || u.userId.toLowerCase().includes(q)
-      || (u.displayName || '').toLowerCase().includes(q)
-      || (u.department || '').toLowerCase().includes(q))
-    .map(u => ({ cap_user_name: u.userId, display_name: u.displayName,
-                 department: u.department, __src: 'user' }))
-    .slice(0, 8)
-})
+const memberCandidates = computed(() => activeUserCandidates(adminUsers.value, memberQuery.value, {
+  exclude: editing.value.members || [], limit: 8,
+}))
 
 const memberQueryError = computed(() => {
   const v = memberQuery.value.trim()
@@ -320,11 +309,11 @@ const memberQueryError = computed(() => {
   if ((editing.value.members || []).includes(v)) return '该工号已在本组'
   return ''
 })
-/** 输入的内容不在候选池里 → 允许手工添加（新员工不会出现在任何表里）。 */
+/** 精确命中启用用户库中的候选后，才允许按输入添加。 */
 const canAddTyped = computed(() => {
   const v = memberQuery.value.trim().toLowerCase()
   if (!v || memberQueryError.value) return false
-  // permission-control v1：用户组成员必须来自已录入或已登录建档且启用的用户库。
+  // 用户组成员必须来自已录入或已登录建档且启用的用户库。
   return memberCandidates.value.some(u => u.cap_user_name.toLowerCase() === v)
 })
 
@@ -378,7 +367,7 @@ const grantDirty = computed(() => grantFingerprint() !== grantSaved.value)
 const grantError = computed(() => {
   const v = grantUserId.value
   if (!v) return '请先填写工号'
-  if (!/^[A-Za-z0-9._@-]{1,64}$/.test(v)) return '工号只能是字母、数字与 . _ @ -（最多 64 位）'
+  if (!USER_RE.test(v)) return '工号只能是字母、数字与 . _ @ -（最多 64 位）'
   const user = adminUsers.value.find(u => u.userId === v)
   if (!user) return '该工号不在用户表中，请先录入或让员工登录建档'
   if (user.status !== 'active') return '该用户已禁用，不能分配个人直授'
@@ -392,14 +381,7 @@ const grantCandidates = computed(() => {
   const q = grantUserId.value.toLowerCase()
   if (!q) return []
   if (adminUsers.value.some(u => u.userId === grantUserId.value)) return []
-  return adminUsers.value
-    .filter(u => u.status === 'active')
-    .filter(u => u.userId.toLowerCase().includes(q)
-      || (u.displayName || '').toLowerCase().includes(q)
-      || (u.department || '').toLowerCase().includes(q))
-    .map(u => ({ cap_user_name: u.userId, display_name: u.displayName,
-                 department: u.department }))
-    .slice(0, 6)
+  return activeUserCandidates(adminUsers.value, q, { limit: 6 })
 })
 
 /** PUT 是全量替换，进入前必须回填该工号现有授权，否则保存会静默清空旧记录。 */
@@ -619,7 +601,7 @@ function pickDirect(u) {
     </div>
     </template>
 
-    <!-- 用户 Tab：用户库 + CAP 录入 + 角色/状态管理（permission-control v1） -->
+    <!-- 用户 Tab：用户库 + CAP 录入 + 角色/状态管理 -->
     <template v-if="subTab==='users'">
     <div class="card mb-4">
       <div class="flex items-start justify-between gap-4">
@@ -851,7 +833,7 @@ function pickDirect(u) {
                   <span v-if="u.display_name && u.display_name !== u.cap_user_name" class="text-xs text-t2 ml-1.5">{{ u.display_name }}</span>
                   <span v-if="u.department" class="text-xs text-t3 ml-1.5">{{ u.department }}</span>
                 </span>
-                <span :class="['text-xs shrink-0 ml-2', u.__src === 'user' ? 'text-up' : 'text-t3']">
+                <span class="text-xs shrink-0 ml-2 text-up">
                   用户库
                 </span>
               </button>

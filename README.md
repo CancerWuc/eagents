@@ -55,6 +55,28 @@ Pluto 或 Kubernetes/Higress 时，相应外部功能不可完整使用。
 前端在 `frontend/` 内执行 `pnpm install --frozen-lockfile` 和 `pnpm dev`；
 `EAGENT_BACKEND` 可覆盖 Vite 的后端代理地址。
 
+## 代码组织与回归检查
+
+管理 API 的 `api/routes.py` 仅汇总路由并保留提示词发布入口。
+业务分为选择器、服务注册与流量治理、总控配置、提示词与运行记录、
+平台增强、服务授权六组；共享输出转换放在对应的 `serializers.py`，
+分页模块与路由共同使用。数据库关闭使用 `contextlib.closing`，
+提交与回滚仍由各业务显式控制。
+
+前端公共表单和展示规则保持在小型业务辅助模块中；运行记录分组组件只
+负责展示和事件，试运行与监控的请求、分页及操作状态仍由详情页管理。
+
+安装上述开发依赖后，在仓库根目录运行针对本次整理的回归检查：
+
+```sh
+PYTHONPATH=backend/src python -m unittest discover -s backend/tests
+pnpm --dir frontend test
+pnpm --dir frontend build
+```
+
+后端用例使用隔离的数据库与外部服务替身，前端用例覆盖公共规则及运行
+记录展示；它们不替代连接真实 MySQL、模型和 HiAgent 的部署验收。
+
 ## 重建范围
 
 本基线来自 2026-10-08 的现有工作区，保留当前主线业务代码。

@@ -1,6 +1,7 @@
 """Admin-session-only A2A simulator. All execution traverses the real A2A app."""
 from __future__ import annotations
 
+from contextlib import closing
 import hashlib
 import asyncio
 import json
@@ -29,16 +30,13 @@ def require_admin_session(request: Request) -> str:
     token = console_auth.bearer_token(request)
     if not token:
         raise errors.UnauthenticatedError("模拟中心需要管理员登录会话")
-    db = Database()
-    try:
+    with closing(Database()) as db:
         ctx = console_auth.auth_context_from_token(db, token)
         if ctx is None:
             raise errors.UnauthenticatedError("登录会话无效或已过期")
         if not ctx.is_admin():
             raise errors.ForbiddenError("模拟中心仅管理员可用")
         return ctx.user_id
-    finally:
-        db.close()
 
 
 def _subject(db: Database, user_id: str) -> dict:
@@ -73,8 +71,7 @@ def list_targets(
     kind: Literal["MASTER", "HIAGENT"] | None = None,
     operator: str = Depends(require_admin_session),
 ):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         _subject(db, asUser)
         visible = set(visible_service_ids(db, asUser))
         rows = [r for r in _targets(db) if (not kind or r["kind"] == kind)
@@ -88,13 +85,10 @@ def list_targets(
                 "unavailableReason": None if available else "该用户无服务调用权限",
             })
         return {"items": items, "total": len(rows), "page": page, "pageSize": pageSize}
-    finally:
-        db.close()
 
 
 def _audit(operator: str, subject: str, slug: str, action: str, detail: dict) -> None:
-    db = Database()
-    try:
+    with closing(Database()) as db:
         db.execute(
             "INSERT INTO eag_audit_event "
             "(audit_id, cap_user_name, action, resource_type, resource_id, detail) "
@@ -103,8 +97,6 @@ def _audit(operator: str, subject: str, slug: str, action: str, detail: dict) ->
              "detail": json.dumps({**detail, "subjectUserId": subject}, ensure_ascii=False)},
         )
         db.commit()
-    finally:
-        db.close()
 
 
 @router.post("/{slug}/rpc")
@@ -132,14 +124,11 @@ async def invoke(
         "SendMessage", "SendStreamingMessage", "GetTask", "CancelTask", "SubscribeToTask",
     }:
         raise errors.ValidationError("模拟中心不支持该 A2A 方法")
-    db = Database()
-    try:
+    with closing(Database()) as db:
         user = _subject(db, asUser)
         target = next((r for r in _targets(db) if r["slug"] == slug), None)
         if target is None:
             raise errors.NotFoundError("Agent 未启用或未挂载 A2A 端点")
-    finally:
-        db.close()
 
     trace_id = new_id("trc_")
     simulation_id = new_id("sim_")

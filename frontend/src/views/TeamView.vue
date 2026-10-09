@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { api } from '../api.js'
 import { config } from '../config.js'
+import { slugValidationError } from '../form-rules.js'
 import Pagination from '../components/Pagination.vue'
 import { useServerPagination, watchPagination } from '../pagination.js'
 
@@ -81,12 +82,11 @@ function reset() {
 function pickTile(k) { tile.value = tile.value === k ? 'all' : k }
 
 // --- 新增 -----------------------------------------------------------------
-// 与后端 routes.SLUG_PATTERN 保持一致（同 contracts/schemas/kb.v1 口径）
-const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,63}$/
 const slugError = computed(() => {
   const v = form.value.slug.trim()
   if (!v) return ''
-  if (!SLUG_RE.test(v)) return '2–64 位，小写字母或数字开头，仅含小写字母、数字与短横线'
+  const error = slugValidationError(v)
+  if (error) return error
   if (masters.value.some(m => m.slug === v)) return '该标识已被占用'
   return ''
 })

@@ -45,10 +45,10 @@ def _serialize(db, name, row):
         from ..kb.service import kb_out
         return kb_out(db, row)
     if name == "kb-tasks":
-        from .kb_routes import _task_out
+        from ..kb.serializers import _task_out
         return _task_out(row)
     if name == "kb-plans":
-        from .kb_routes import _plan_out
+        from ..kb.serializers import _plan_out
         return _plan_out(row)
     if name == "kb-revs":
         return {
@@ -60,7 +60,7 @@ def _serialize(db, name, row):
     if name == "kb-reviews":
         row["payload"] = _json(row.pop("payload_json", None))
     if name == "perf-datasets":
-        from ..perf.routes import _dataset_out
+        from ..perf.serializers import _dataset_out
         return _dataset_out(row)
     if name == "gateway-services":
         from ..gateway.mcp_service import _service_out
@@ -113,7 +113,8 @@ def list_page(db, name: str, page: Page, **context) -> dict:
                           "JOIN eag_a2a_service_registration s ON s.service_id=v.service_id",
                           "cap_user_name", {}, page, direct_out)
     if name == "admin-users":
-        from .user_admin_routes import _public_user, _roles_of
+        from .serializers import _public_user
+        from ..security.console_auth import user_roles
         def user_out(row):
             count = db.query_one(
                 "SELECT COUNT(DISTINCT visible.service_id) AS n FROM ("
@@ -122,7 +123,7 @@ def list_page(db, name: str, page: Page, **context) -> dict:
                 "ON gv.group_id=gm.group_id WHERE gm.cap_user_name=:u) visible "
                 "JOIN eag_a2a_service_registration s ON s.service_id=visible.service_id",
                 {"u": row["user_id"]})["n"]
-            return _public_user(row, _roles_of(db, row["user_id"]), count)
+            return _public_user(row, user_roles(db, row["user_id"]), count)
         params = {}
         sql = search_filter("SELECT * FROM eag_console_user", ("user_id", "display_name", "department"), params, page)
         status = page.filters.get("status")
@@ -139,7 +140,7 @@ def list_page(db, name: str, page: Page, **context) -> dict:
         return query_page(db, sql, "i.created_at DESC, i.installation_id", {"ws": context["workspace_id"]}, page)
     if name == "instances":
         from ..registry.model import Instance
-        from .governance_routes import _instance_out
+        from .serializers import _instance_out
         return query_page(db, "SELECT * FROM eag_agent_instance WHERE service_id=:sid "
                           "AND (lease_expires_at IS NULL OR lease_expires_at>NOW(6))",
                           "created_at, instance_id", {"sid": context["service_id"]}, page,
@@ -175,7 +176,7 @@ def list_page(db, name: str, page: Page, **context) -> dict:
                           "version_no DESC, prompt_version_id", {"mid": context["master_id"]}, page,
                           current_prompt_version_id=current)
     if name == "runs":
-        from .routes import RUN_SOURCE_PREFIXES, _like_prefix
+        from .run_filters import RUN_SOURCE_PREFIXES, _like_prefix
         sql = "SELECT * FROM eag_run_record WHERE master_id=:mid"
         params = {"mid": context["master_id"]}
         source = context.get("source", "all")
@@ -230,7 +231,7 @@ def list_page(db, name: str, page: Page, **context) -> dict:
 
 
 def services_page(db, page, scope=None, cap_user_name=None):
-    from .routes import _service_out
+    from .serializers import _service_out
     from ..permission.service import visible_service_ids
     base = ("SELECT s.*, COALESCE(h.health,'UNKNOWN') AS health, h.latency_ms AS health_latency_ms, "
             "h.detail AS health_detail, h.observed_at AS health_observed_at FROM eag_a2a_service_registration s "
@@ -285,7 +286,7 @@ async def teams_page(db, page):
 
 
 def _teams_page_with_states(db, page, states):
-    from .routes import _public_master
+    from .serializers import _public_master
     base = ("SELECT m.*, (SELECT COUNT(*) FROM eag_master_binding b WHERE b.master_id=m.master_id) binding_count, "
             "(SELECT COUNT(*) FROM eag_kb_binding k WHERE k.target_type='MASTER' AND k.target_id=m.master_id "
             ") kb_binding_count, (SELECT COUNT(*) FROM eag_master_prompt_version p "

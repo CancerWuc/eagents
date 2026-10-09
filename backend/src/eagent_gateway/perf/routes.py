@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+from contextlib import closing
 from datetime import datetime
 from typing import Annotated
 
@@ -21,16 +22,13 @@ from ..api.pagination import Page, optional_page, reject_mixed_pagination
 from ..api.list_pages import list_page
 from . import dao, dataset_service
 from .runner import next_fire_at, resolve_target_endpoint
+from .serializers import _str_ts, _dataset_out
 
 router = APIRouter(prefix="/api/v1/perf")
 
 
 def _user(cap_user_name: str | None) -> str:
     return cap_user_name or "anonymous"
-
-
-def _str_ts(v) -> str | None:
-    return str(v) if v else None
 
 
 # ===========================================================================
@@ -42,31 +40,14 @@ class DatasetIn(BaseModel):
     datasetType: str
 
 
-def _dataset_out(ds: dict) -> dict:
-    return {
-        "perf_dataset_id": ds["perf_dataset_id"],
-        "master_id": ds["master_id"],
-        "name": ds["name"],
-        "dataset_type": ds["dataset_type"],
-        "status": ds["status"],
-        "case_count": ds["case_count"],
-        "created_by": ds["created_by"],
-        "created_at": _str_ts(ds["created_at"]),
-        "updated_at": _str_ts(ds["updated_at"]),
-    }
-
-
 @router.post("/datasets", status_code=201, dependencies=[Depends(require_agent_manage)])
 def create_dataset(body: DatasetIn, cap_user_name: str | None = Header(None)):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         ds = dataset_service.create_dataset(
             db, master_id=body.masterId, name=body.name,
             dataset_type=body.datasetType, created_by=_user(cap_user_name),
         )
         return _dataset_out(ds)
-    finally:
-        db.close()
 
 
 @router.post("/datasets/{dataset_id}:upload", dependencies=[Depends(require_agent_manage)])
@@ -74,8 +55,7 @@ async def upload_dataset(
     dataset_id: str, file: UploadFile,
     cap_user_name: str | None = Header(None),
 ):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         data = await file.read()
         out = dataset_service.upload_cases(
             db, dataset_id=dataset_id,
@@ -83,43 +63,32 @@ async def upload_dataset(
         )
         out["dataset"] = _dataset_out(dao.get_dataset(db, dataset_id))
         return out
-    finally:
-        db.close()
 
 
 @router.get("/datasets", dependencies=[Depends(require_agent_manage)])
 def list_datasets(masterId: str | None = None, paging: Page | None = Depends(optional_page)):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         if isinstance(paging, Page):
             return list_page(db, "perf-datasets", paging, masterId=masterId)
         return {"datasets": [
             _dataset_out(ds) for ds in dao.list_datasets(db, masterId)
         ]}
-    finally:
-        db.close()
 
 
 @router.get("/datasets/{dataset_id}", dependencies=[Depends(require_agent_manage), Depends(reject_mixed_pagination)])
 def get_dataset(dataset_id: str, page: Annotated[int, Query(ge=1)] = 1, pageSize: Annotated[int, Query(ge=1, le=200)] = 50):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         ds = dao.get_dataset(db, dataset_id)
         if not ds or ds["status"] != "ACTIVE":
             raise errors.NotFoundError("数据集不存在")
         out = list_page(db, "perf-cases", Page(page, pageSize), dataset_id=dataset_id)
         return {**out, "dataset": _dataset_out(ds), "cases": out["items"]}
-    finally:
-        db.close()
 
 
 @router.delete("/datasets/{dataset_id}", dependencies=[Depends(require_agent_manage)])
 def delete_dataset(dataset_id: str):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         return dataset_service.delete_dataset(db, dataset_id)
-    finally:
-        db.close()
 
 
 # ===========================================================================
@@ -155,8 +124,7 @@ class TestIn(BaseModel):
 
 @router.post("/tests", status_code=201, dependencies=[Depends(require_agent_manage)])
 def create_test(body: TestIn, cap_user_name: str | None = Header(None)):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         if body.testType not in dao.TEST_TYPES:
             raise errors.ValidationError(
                 f"testType 必须为 {list(dao.TEST_TYPES)}",
@@ -223,8 +191,6 @@ def create_test(body: TestIn, cap_user_name: str | None = Header(None)):
             created_by=_user(cap_user_name),
         )
         return _test_out(db, test)
-    finally:
-        db.close()
 
 
 def _test_out(db: Database, test: dict) -> dict:
@@ -247,8 +213,7 @@ def _test_out(db: Database, test: dict) -> dict:
 
 @router.get("/tests", dependencies=[Depends(require_agent_manage)])
 def list_tests(masterId: str | None = None, limit: int = 50, paging: Page | None = Depends(optional_page)):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         if isinstance(paging, Page):
             return list_page(db, "perf-tests", paging, masterId=masterId)
         rows = []
@@ -258,8 +223,6 @@ def list_tests(masterId: str | None = None, limit: int = 50, paging: Page | None
             t["finished_at"] = _str_ts(t["finished_at"])
             rows.append(t)
         return {"tests": rows}
-    finally:
-        db.close()
 
 
 def _next_fire_at(db: Database, test: dict) -> str | None:
@@ -278,8 +241,7 @@ def _next_fire_at(db: Database, test: dict) -> str | None:
 
 @router.get("/tests/{test_id}", dependencies=[Depends(require_agent_manage)])
 def get_test_detail(test_id: str):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         test = dao.get_test(db, test_id)
         if not test:
             raise errors.NotFoundError("测试不存在")
@@ -292,8 +254,6 @@ def get_test_detail(test_id: str):
         out["nextFireAt"] = _next_fire_at(db, test)
         out["cancelRequested"] = bool(test.get("cancel_flag"))
         return out
-    finally:
-        db.close()
 
 
 @router.get("/tests/{test_id}/samples", dependencies=[Depends(require_agent_manage), Depends(reject_mixed_pagination)])
@@ -301,8 +261,7 @@ def list_samples(
     test_id: str, status: str | None = None,
     page: Annotated[int, Query(ge=1)] = 1, pageSize: Annotated[int, Query(ge=1, le=200)] = 50,
 ):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         if not dao.get_test(db, test_id):
             raise errors.NotFoundError("测试不存在")
         out = list_page(db, "perf-samples", Page(page, pageSize), test_id=test_id, status=status)
@@ -311,15 +270,12 @@ def list_samples(
             r["sent_at"] = _str_ts(r["sent_at"])
             r["finished_at"] = _str_ts(r["finished_at"])
         return {**out, "samples": rows}
-    finally:
-        db.close()
 
 
 @router.post("/tests/{test_id}:cancel", dependencies=[Depends(require_agent_manage)])
 def cancel_test(test_id: str):
     """PENDING 直接终态 CANCELED；RUNNING 置 cancel_flag 由 worker 检查点处理。"""
-    db = Database()
-    try:
+    with closing(Database()) as db:
         test = dao.get_test(db, test_id)
         if not test:
             raise errors.NotFoundError("测试不存在")
@@ -335,8 +291,6 @@ def cancel_test(test_id: str):
         raise errors.ConflictError(
             f"测试已结束（{test['status']}），无需取消",
         )
-    finally:
-        db.close()
 
 
 @router.post("/tests/{test_id}:analyze", dependencies=[Depends(require_agent_manage)])
@@ -345,8 +299,7 @@ async def analyze_test(test_id: str):
     from . import analysis as perf_analysis
     from . import dao as perf_dao
 
-    db = Database()
-    try:
+    with closing(Database()) as db:
         test = perf_dao.get_test(db, test_id)
         if not test:
             raise errors.NotFoundError("测试不存在")
@@ -359,15 +312,12 @@ async def analyze_test(test_id: str):
                 "LLM 未配置（EAGENT_LLM_API_KEY 为空），无法生成分析报告",
             )
         return result
-    finally:
-        db.close()
 
 
 @router.get("/tests/{test_id}/analysis", dependencies=[Depends(require_agent_manage)])
 def get_analysis(test_id: str, download: bool = False):
     """获取已生成的分析报告；download=true 以 Markdown 附件下载。"""
-    db = Database()
-    try:
+    with closing(Database()) as db:
         test = dao.get_test(db, test_id)
         if not test:
             raise errors.NotFoundError("测试不存在")
@@ -387,5 +337,3 @@ def get_analysis(test_id: str, download: bool = False):
             "analysis_model": test.get("analysis_model"),
             "analysis_at": _str_ts(test.get("analysis_at")),
         }
-    finally:
-        db.close()

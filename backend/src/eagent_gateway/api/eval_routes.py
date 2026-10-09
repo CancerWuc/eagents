@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """评测/标注/优化 管理台路由（§9.1 评测组）。"""
+from contextlib import closing
 from datetime import datetime, timedelta
 import asyncio
 import json
@@ -23,8 +24,7 @@ router = APIRouter(prefix="/api/v1")
 def list_runs(
     master_id: str | None = None, status: str | None = None, limit: int = 50,
 ):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         conds, params = [], {"lim": min(limit, 200)}
         if master_id:
             conds.append("master_id=:mid")
@@ -38,8 +38,6 @@ def list_runs(
             f" ORDER BY started_at DESC LIMIT :lim",
             params,
         )
-    finally:
-        db.close()
 
 
 def _require_dataset(db: Database, dataset_id: str) -> dict:
@@ -60,24 +58,18 @@ class DatasetIn(BaseModel):
 
 @router.post("/datasets", dependencies=[Depends(require_agent_manage)])
 def create_dataset(body: DatasetIn):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         return eval_svc.create_dataset_from_runs(
             db, name=body.name, master_id=body.masterId, run_ids=body.runIds,
         )
-    finally:
-        db.close()
 
 
 @router.get("/datasets", dependencies=[Depends(require_agent_manage)])
 def list_datasets(master_id: str | None = None, paging: Page | None = Depends(optional_page)):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         if isinstance(paging, Page):
             return list_page(db, "datasets", paging, master_id=master_id)
         return eval_svc.list_datasets(db, master_id)
-    finally:
-        db.close()
 
 
 class DatasetPatchIn(BaseModel):
@@ -86,22 +78,16 @@ class DatasetPatchIn(BaseModel):
 
 @router.patch("/datasets/{dataset_id}", dependencies=[Depends(require_agent_manage)])
 def rename_dataset(dataset_id: str, body: DatasetPatchIn):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         _require_dataset(db, dataset_id)
         return eval_svc.rename_dataset(db, dataset_id, body.name.strip())
-    finally:
-        db.close()
 
 
 @router.delete("/datasets/{dataset_id}", dependencies=[Depends(require_agent_manage)])
 def delete_dataset(dataset_id: str):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         _require_dataset(db, dataset_id)
         return eval_svc.delete_dataset(db, dataset_id)
-    finally:
-        db.close()
 
 
 class AppendCasesIn(BaseModel):
@@ -111,28 +97,22 @@ class AppendCasesIn(BaseModel):
 @router.post("/datasets/{dataset_id}/cases", dependencies=[Depends(require_agent_manage)])
 def append_cases(dataset_id: str, body: AppendCasesIn):
     """把运行记录追加进已有评测集（运行监控/调用链上的「加入测试集」入口）。"""
-    db = Database()
-    try:
+    with closing(Database()) as db:
         _require_dataset(db, dataset_id)
         return eval_svc.append_cases_from_runs(
             db, dataset_id=dataset_id, run_ids=body.runIds,
         )
-    finally:
-        db.close()
 
 
 @router.get("/datasets/{dataset_id}/cases", dependencies=[Depends(require_agent_manage)])
 def list_cases(dataset_id: str, paging: Page | None = Depends(optional_page)):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         # 与 PATCH/DELETE/POST 同口径: 集不存在就 404。否则前端打开一个已被
         # 删掉的集会拿到空数组，显示成"没有用例"，分不清"空集"和"集没了"。
         _require_dataset(db, dataset_id)
         if isinstance(paging, Page):
             return list_page(db, "cases", paging, dataset_id=dataset_id)
         return eval_svc.list_cases(db, dataset_id)
-    finally:
-        db.close()
 
 
 class AnnotationIn(BaseModel):
@@ -149,8 +129,7 @@ def annotate(
     case_id: str, body: AnnotationIn,
     cap_user_name: str | None = Header(None),
 ):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         if not db.query_one(
             "SELECT 1 AS x FROM eag_eval_case WHERE case_id=:cid",
             {"cid": case_id},
@@ -163,8 +142,6 @@ def annotate(
             corrected_service=body.correctedService,
             expected_text=body.expectedText,
         )
-    finally:
-        db.close()
 
 
 class OptimizationIn(BaseModel):
@@ -212,8 +189,7 @@ def list_optimizations(
     没有这个接口的时候，optimization_id 只存在于前端那次调用的内存变量里，
     页面一刷新就再也找不回任务——任务还在跑，结果却永远看不到。
     """
-    db = Database()
-    try:
+    with closing(Database()) as db:
         sweep_stale_optimizations(db)
         if isinstance(paging, Page):
             return list_page(db, "optimizations", paging, master_id=master_id, dataset_id=dataset_id)
@@ -242,8 +218,6 @@ def list_optimizations(
             params,
         )
         return rows
-    finally:
-        db.close()
 
 
 @router.post("/optimizations", dependencies=[Depends(require_agent_manage)])
@@ -251,8 +225,7 @@ def create_optimization(
     body: OptimizationIn, background: BackgroundTasks,
     cap_user_name: str | None = Header(None),
 ):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         from ..persistence.db import new_id, now
 
         # 前置校验: 空集直接发起会白跑一轮回放才发现无事可做；
@@ -292,8 +265,6 @@ def create_optimization(
         db.commit()
         background.add_task(_run_optimization_task, oid)
         return {"optimization_id": oid, "status": "RUNNING"}
-    finally:
-        db.close()
 
 
 def _run_optimization_task(oid: str) -> None:
@@ -314,8 +285,7 @@ def _run_optimization_task(oid: str) -> None:
 
 @router.get("/optimizations/{optimization_id}", dependencies=[Depends(require_agent_manage)])
 def get_optimization(optimization_id: str):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         sweep_stale_optimizations(db)
         opt = db.query_one(
             "SELECT * FROM eag_optimization_run WHERE optimization_id=:oid",
@@ -331,8 +301,6 @@ def get_optimization(optimization_id: str):
             {"oid": optimization_id},
         )
         return {"optimization": opt, "candidates": candidates}
-    finally:
-        db.close()
 
 
 def _get_candidate(db, optimization_id: str, candidate_id: str) -> dict:
@@ -410,8 +378,7 @@ def approve_candidate(
     的话，线上跑的是"新提示词 + 旧轮数"，与评测组合不一致，报告里的准确率
     在线上不可复现。因此这里连同 react_config 一起落。
     """
-    db = Database()
-    try:
+    with closing(Database()) as db:
         cand = _get_candidate(db, optimization_id, candidate_id)
         if cand["recommendation"] != "PROPOSE":
             raise ConflictError("仅 PROPOSE 候选可发布")
@@ -431,8 +398,6 @@ def approve_candidate(
             )
         master_id = version["master_id"]
         react_applied = _apply_candidate_react_config(db, master_id, cand)
-    finally:
-        db.close()
     # 复用 routes.publish_prompt（自带校验/SUPERSEDED/指针/审计/提交）
     from .routes import publish_prompt
 
@@ -456,8 +421,7 @@ def reject_candidate(
     cap_user_name: str | None = Header(None),
 ):
     """L5: 人工驳回候选（幂等）——标记 REJECTED，不触碰提示词版本。"""
-    db = Database()
-    try:
+    with closing(Database()) as db:
         cand = _get_candidate(db, optimization_id, candidate_id)
         if cand["recommendation"] == "REJECTED":
             return {"rejected": True, "candidate_id": candidate_id}
@@ -477,5 +441,3 @@ def reject_candidate(
         )
         db.commit()
         return {"rejected": True, "candidate_id": candidate_id}
-    finally:
-        db.close()

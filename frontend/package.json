@@ -6,6 +6,7 @@
   "packageManager": "pnpm@11.2.2",
   "scripts": {
     "dev": "vite",
+    "test": "node --test tests/*.test.js",
     "build": "vite build",
     "preview": "vite preview"
   },

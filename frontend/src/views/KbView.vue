@@ -5,6 +5,7 @@
 // 整理方案卡片：placement + changes 勾选（依赖闭包） + preview diff + 确认/驳回（D8 文案）
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { api } from '../api.js'
+import { fmtDateTime } from '../format.js'
 import { promptText, confirmAction } from '../ui.js'
 import { notify } from '../notify.js'
 
@@ -33,7 +34,6 @@ const searchQ = ref('')
 const searchResult = ref(null)
 const searching = ref(false)
 const uploadBusy = ref(false)
-const rejectPlanId = ref(null)
 
 const kbsPager = useServerPagination(kbs, () => '/api/v1/knowledge-bases')
 const kbUrl = suffix => `/api/v1/knowledge-bases/${detail.value?.kb_id}/${suffix}`
@@ -279,7 +279,6 @@ async function toggleBind(kb) {
   notify({ code: 'BINDINGS_SET', message: `绑定已更新，该 Agent 当前可检索 ${out.bindings.length} 个知识库` })
 }
 
-function fmtTime(t) { return (t || '').replace('T', ' ').slice(0, 19) }
 </script>
 
 <template>
@@ -309,7 +308,7 @@ function fmtTime(t) { return (t || '').replace('T', ' ').slice(0, 19) }
             <td>{{ kb.page_count }}</td>
             <td class="font-mono text-xs">{{ kb.current_rev || '—' }}</td>
             <td>{{ kb.binding_count }}</td>
-            <td class="text-xs text-t3">{{ fmtTime(kb.updated_at) }}</td>
+            <td class="text-xs text-t3">{{ fmtDateTime(kb.updated_at, '') }}</td>
             <td class="whitespace-nowrap">
               <button class="btn btn-text" @click.stop="open(kb)">详情</button>
               <button v-if="canManage" class="btn btn-text text-red-500" :disabled="deleting === kb.kb_id" @click.stop="removeKb(kb)">删除</button>
@@ -427,7 +426,7 @@ function fmtTime(t) { return (t || '').replace('T', ' ').slice(0, 19) }
             <td><span :class="{ DONE: 'badge badge-ok', PENDING: 'badge badge-warn', PLANNING: 'badge badge-warn', FAILED: 'badge badge-err' }[s.status] || 'badge badge-gray'" :title="s.status">{{ t(SRC_STATUS_TEXT, s.status) }}</span></td>
             <td class="font-mono text-xs text-t3">{{ s.sha256?.slice(0, 12) }}…</td>
             <td class="font-mono text-xs">{{ s.last_rev || '—' }}</td>
-            <td class="text-xs text-t3">{{ fmtTime(s.created_at) }}</td>
+            <td class="text-xs text-t3">{{ fmtDateTime(s.created_at, '') }}</td>
             <td class="whitespace-nowrap">
               <button v-if="canManage" class="btn btn-text" title="跳过 30 秒等待，立刻重新生成整理方案" @click="replan(s)">重新整理</button>
               <button v-if="canManage" class="btn btn-text text-red-500" @click="removeSource(s)">删除</button>
@@ -449,7 +448,7 @@ function fmtTime(t) { return (t || '').replace('T', ' ').slice(0, 19) }
             <td>{{ p.title }}</td>
             <td>{{ p.chunk_count }}</td>
             <td><span :class="p.embedded ? 'badge badge-ok' : 'badge badge-gray'">{{ p.embedded ? '是' : '否' }}</span></td>
-            <td class="text-xs text-t3">{{ fmtTime(p.updated_at) }}</td>
+            <td class="text-xs text-t3">{{ fmtDateTime(p.updated_at, '') }}</td>
           </tr>
         </tbody>
       </table>
@@ -633,7 +632,7 @@ function fmtTime(t) { return (t || '').replace('T', ' ').slice(0, 19) }
               <td><span :class="{ DONE: 'badge badge-ok', RUNNING: 'badge badge-warn', PENDING: 'badge badge-gray', FAILED: 'badge badge-err', CANCELED: 'badge badge-gray' }[t.status]" :title="t.status">{{ TASK_STATUS_TEXT[t.status] || t.status }}</span></td>
               <td class="text-xs text-t2">{{ t.progress_msg || '—' }}</td>
               <td>{{ t.retry_count }}</td>
-              <td class="text-xs text-t3">{{ fmtTime(t.created_at) }}</td>
+              <td class="text-xs text-t3">{{ fmtDateTime(t.created_at, '') }}</td>
               <td>
                 <button v-if="canManage && ['PENDING', 'RUNNING'].includes(t.status)" class="btn btn-text text-red-500" @click="cancelTask(t)">取消</button>
               </td>
@@ -651,7 +650,7 @@ function fmtTime(t) { return (t || '').replace('T', ' ').slice(0, 19) }
               <td class="font-mono text-xs">{{ r.rev }}<span v-if="r.rev === detail.current_rev" class="badge badge-brand ml-2">对外服务中</span></td>
               <td><span :class="{ READY: 'badge badge-ok', BUILDING: 'badge badge-warn', FAILED: 'badge badge-err' }[r.status]" :title="r.status">{{ t(REV_STATUS_TEXT, r.status) }}</span></td>
               <td class="text-xs text-t2">新建 {{ r.summary?.pages_created ?? '—' }} 页 · 更新 {{ r.summary?.pages_updated ?? '—' }} 页 · 质检发现 {{ r.report?.lint_issues ?? '—' }} 个问题</td>
-              <td class="text-xs text-t3">{{ fmtTime(r.created_at) }}</td>
+              <td class="text-xs text-t3">{{ fmtDateTime(r.created_at, '') }}</td>
             </tr>
           </tbody>
         </table>

@@ -100,7 +100,6 @@ function statusBadge(s) {
     FAILED: 'badge badge-err', CANCELED: 'badge badge-gray', SUCCEEDED: 'badge badge-ok',
     TIMEOUT: 'badge badge-err', REJECTED: 'badge badge-warn' }[s] || 'badge badge-gray'
 }
-function fmtTime(t) { return (t || '').replace('T', ' ').slice(0, 19) }
 function fmtSec(t) {
   if (!t) return '—'
   const d = new Date(t)
@@ -324,7 +323,7 @@ onMounted(async () => {
               <td class="font-medium">{{ ds.name }}</td>
               <td><span :class="ds.dataset_type === 'PRESSURE' ? 'badge badge-brand' : 'badge badge-warn'">{{ ds.dataset_type === 'PRESSURE' ? '压力' : '仿真' }}</span></td>
               <td>{{ ds.case_count }}</td>
-              <td class="text-xs text-t3">{{ fmtTime(ds.created_at) }}</td>
+              <td class="text-xs text-t3">{{ fmtDateTime(ds.created_at, '') }}</td>
               <td class="whitespace-nowrap">
                 <input type="file" class="hidden" :id="'perf-up-' + ds.perf_dataset_id" :disabled="uploadBusyId === ds.perf_dataset_id" @change="e => onUpload(e, ds)" />
                 <button v-if="canManage" class="btn btn-text" :disabled="uploadBusyId === ds.perf_dataset_id" @click="document.getElementById('perf-up-' + ds.perf_dataset_id).click()">
@@ -456,7 +455,7 @@ onMounted(async () => {
           <div><div class="text-xs text-t3">QPS</div><div class="text-lg font-semibold">{{ qps(activeTest) }}</div></div>
           <div><div class="text-xs text-t3">平均延迟</div><div class="text-lg font-semibold">{{ activeTest.progress.avgLatencyMs != null ? activeTest.progress.avgLatencyMs + 'ms' : '—' }}</div></div>
         </div>
-        <div v-if="activeTest.nextFireAt" class="text-sm text-warn mb-2">下次触发：{{ fmtTime(activeTest.nextFireAt) }}（到点自动发送，期间可取消）</div>
+        <div v-if="activeTest.nextFireAt" class="text-sm text-warn mb-2">下次触发：{{ fmtDateTime(activeTest.nextFireAt, '') }}（到点自动发送，期间可取消）</div>
 
         <!-- 报告（完成后） -->
         <div v-if="activeTest.report" class="border border-line rounded-lg p-3 text-sm">
@@ -500,7 +499,7 @@ onMounted(async () => {
               <td>{{ s.latency_ms != null ? s.latency_ms + 'ms' : '—' }}</td>
               <td>{{ s.answer_match == null ? '—' : (s.answer_match ? '✓' : '✗') }}</td>
               <td class="font-mono text-xs text-t3">{{ s.trace_id || '—' }}</td>
-              <td class="text-xs text-t3">{{ fmtTime(s.sent_at) }}</td>
+              <td class="text-xs text-t3">{{ fmtDateTime(s.sent_at, '') }}</td>
             </tr>
           </tbody>
         </table>
@@ -520,8 +519,8 @@ onMounted(async () => {
                 <td>{{ t.test_type }}</td>
                 <td class="text-xs">{{ t.target_type }} {{ t.target_id.slice(0, 12) }}…</td>
                 <td><span :class="statusBadge(t.status)">{{ t.status }}</span></td>
-                <td class="text-xs text-t3">{{ fmtTime(t.created_at) }}</td>
-                <td class="text-xs text-t3">{{ fmtTime(t.started_at) }}<br />{{ fmtTime(t.finished_at) }}</td>
+                <td class="text-xs text-t3">{{ fmtDateTime(t.created_at, '') }}</td>
+                <td class="text-xs text-t3">{{ fmtDateTime(t.started_at, '') }}<br />{{ fmtDateTime(t.finished_at, '') }}</td>
                 <td><button class="btn btn-text" @click="openHistory(t)">{{ detailTest?.perf_test_id === t.perf_test_id ? '收起' : '详情' }}</button></td>
               </tr>
               <tr v-if="detailTest?.perf_test_id === t.perf_test_id">
@@ -628,8 +627,8 @@ onMounted(async () => {
               <td class="font-mono text-xs">{{ t.perf_test_id }}</td>
               <td class="text-xs">{{ t.target_type }}</td>
               <td><span :class="statusBadge(t.status)">{{ t.status }}</span></td>
-              <td class="text-xs text-t3">{{ fmtTime(t.created_at) }}</td>
-              <td class="text-xs text-t3">{{ fmtTime(t.started_at) }}<br />{{ fmtTime(t.finished_at) }}</td>
+              <td class="text-xs text-t3">{{ fmtDateTime(t.created_at, '') }}</td>
+              <td class="text-xs text-t3">{{ fmtDateTime(t.started_at, '') }}<br />{{ fmtDateTime(t.finished_at, '') }}</td>
               <td><button class="btn btn-text" @click="watchTest(t.perf_test_id)">查看</button></td>
             </tr>
           </tbody>

@@ -5,6 +5,7 @@
 // 状态卡片支持 5s 自动轮询。密钥仅在创建/轮换响应中一次性展示。
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { api } from '../api.js'
+import { fmtDateTime } from '../format.js'
 import { promptText, confirmAction } from '../ui.js'
 import { notify } from '../notify.js'
 
@@ -77,7 +78,6 @@ function compBadge(s) {
   return { ready: 'badge badge-ok', not_ready: 'badge badge-err', absent: 'badge badge-gray', unknown: 'badge badge-gray' }[s] || 'badge badge-gray'
 }
 function resultBadge(r) { return r === 'success' ? 'badge badge-ok' : 'badge badge-err' }
-function fmtTime(t) { return (t || '').replace('T', ' ').slice(0, 19) }
 
 async function loadProfiles(keepPid = true) {
   const out = await api.listGatewayProfiles()
@@ -417,7 +417,7 @@ onBeforeUnmount(() => setAutoPoll(false))
             </div>
             <div class="border border-line rounded-lg p-3 text-center">
               <div class="text-xs text-t3">最近写入</div>
-              <div class="text-xs font-medium mt-2">{{ fmtTime(overview.latestWriteAt) }}</div>
+              <div class="text-xs font-medium mt-2">{{ fmtDateTime(overview.latestWriteAt, '') }}</div>
             </div>
           </div>
           <div v-if="overview && !overview.connectivity.connected" class="mt-3 text-sm text-red-600">
@@ -439,7 +439,7 @@ onBeforeUnmount(() => setAutoPoll(false))
               <tbody>
                 <tr v-if="!audits.audits.length"><td colspan="6" class="text-center text-t3 py-8">暂无审计记录</td></tr>
                 <tr v-for="a in audits.audits" :key="a.id">
-                  <td class="text-xs">{{ fmtTime(a.created_at) }}</td>
+                  <td class="text-xs">{{ fmtDateTime(a.created_at, '') }}</td>
                   <td><span class="badge badge-gray">{{ a.resource_type }}</span></td>
                   <td>{{ a.action }}</td>
                   <td>{{ a.operator }}</td>
@@ -518,7 +518,7 @@ onBeforeUnmount(() => setAutoPoll(false))
                 </td>
                 <td><span class="badge badge-ok">{{ s.status }}</span></td>
                 <td class="text-sm">{{ s.created_by }}</td>
-                <td class="text-xs">{{ fmtTime(s.updated_at) }}</td>
+                <td class="text-xs">{{ fmtDateTime(s.updated_at, '') }}</td>
                 <td><button v-if="canManage" class="btn btn-text text-red-600" @click="removeService(s)">移除</button></td>
               </tr>
             </tbody>
@@ -616,11 +616,11 @@ onBeforeUnmount(() => setAutoPoll(false))
                 <td><code class="text-xs bg-canvas px-1.5 py-0.5 rounded">{{ c.credential }}</code></td>
                 <td class="text-xs">{{ c.routes.join(', ') || '—' }}</td>
                 <td>
-                  <span v-if="c.in_grace" class="badge badge-warn">宽限期 → {{ fmtTime(c.prev_expires_at) }}</span>
+                  <span v-if="c.in_grace" class="badge badge-warn">宽限期 → {{ fmtDateTime(c.prev_expires_at, '') }}</span>
                   <span v-else class="badge badge-gray">稳定</span>
                 </td>
                 <td class="text-sm">{{ c.created_by }}</td>
-                <td class="text-xs">{{ fmtTime(c.updated_at) }}</td>
+                <td class="text-xs">{{ fmtDateTime(c.updated_at, '') }}</td>
                 <td class="whitespace-nowrap">
                   <button v-if="canManage" class="btn btn-text" @click="rotateConsumer(c)">轮换</button>
                   <button v-if="canManage" class="btn btn-text text-red-600" @click="removeConsumer(c)">删除</button>

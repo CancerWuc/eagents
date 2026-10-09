@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+from contextlib import closing
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
@@ -78,19 +79,15 @@ class ProfileUpdateIn(BaseModel):
 
 @router.get("/profiles")
 def list_profiles(user: str = Depends(require_gateway_manage)):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         return {"profiles": [_profile_out(p) for p in dao.list_profiles(db)]}
-    finally:
-        db.close()
 
 
 @router.post("/profiles", status_code=201)
 def create_profile(
     body: ProfileIn, user: str = Depends(require_gateway_manage),
 ):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         if dao.get_profile_by_name(db, body.name):
             raise errors.ConflictError(f"网关环境已存在: {body.name}")
         p = dao.create_profile(
@@ -103,17 +100,12 @@ def create_profile(
             payload_after=_profile_out(p), result="success", operator=user,
         )
         return _profile_out(p)
-    finally:
-        db.close()
 
 
 @router.get("/profiles/{profile_id}")
 def get_profile(profile_id: int, user: str = Depends(require_gateway_manage)):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         return _profile_out(_profile_or_404(db, profile_id))
-    finally:
-        db.close()
 
 
 @router.put("/profiles/{profile_id}")
@@ -121,8 +113,7 @@ def update_profile(
     profile_id: int, body: ProfileUpdateIn,
     user: str = Depends(require_gateway_manage),
 ):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         _profile_or_404(db, profile_id)
         updated = dao.update_profile(
             db, profile_id, higress_ns=body.higressNs,
@@ -136,16 +127,13 @@ def update_profile(
             operator=user,
         )
         return _profile_out(updated)
-    finally:
-        db.close()
 
 
 @router.delete("/profiles/{profile_id}")
 def delete_profile(
     profile_id: int, user: str = Depends(require_gateway_manage),
 ):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         p = _profile_or_404(db, profile_id)
         children = dao.count_profile_children(db, profile_id)
         if children:
@@ -161,8 +149,6 @@ def delete_profile(
             operator=user,
         )
         return {"deleted": p["name"]}
-    finally:
-        db.close()
 
 
 @router.get("/profiles/{profile_id}/status")
@@ -170,16 +156,13 @@ def profile_status(
     profile_id: int, user: str = Depends(require_gateway_manage),
 ):
     """连通性探测 + 资源计数汇总（T04/T11）；探测到的版本回写 profile。"""
-    db = Database()
-    try:
+    with closing(Database()) as db:
         profile = _profile_or_404(db, profile_id)
         out = status_mod.profile_overview(db, profile)
         ver = (out.get("connectivity") or {}).get("higressVersion")
         if ver and not profile.get("higress_version"):
             dao.update_profile(db, profile_id, higress_version=ver)
         return out
-    finally:
-        db.close()
 
 
 # ===========================================================================
@@ -218,8 +201,7 @@ def list_mcp_services(
     profile_id: int, user: str = Depends(require_gateway_manage),
     paging: Page | None = Depends(optional_page),
 ):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         profile = _profile_or_404(db, profile_id)
         if isinstance(paging, Page):
             out = list_page(db, "gateway-services", paging, profile_id=profile_id)
@@ -241,8 +223,6 @@ def list_mcp_services(
         except errors.EAgentError as exc:
             out["liveError"] = exc.message
         return out
-    finally:
-        db.close()
 
 
 @router.post("/profiles/{profile_id}/mcp-services", status_code=201)
@@ -250,8 +230,7 @@ def register_mcp_service(
     profile_id: int, body: McpServiceIn,
     user: str = Depends(require_gateway_manage),
 ):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         profile = _profile_or_404(db, profile_id)
         _live_client(db, profile)
         return sync.register_mcp_service(
@@ -263,23 +242,18 @@ def register_mcp_service(
             route=body.route.model_dump() if body.route else None,
             operator=user,
         )
-    finally:
-        db.close()
 
 
 @router.delete("/profiles/{profile_id}/mcp-services/{name}")
 def delete_mcp_service(
     profile_id: int, name: str, user: str = Depends(require_gateway_manage),
 ):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         profile = _profile_or_404(db, profile_id)
         _live_client(db, profile)
         return mcp_service.delete_service(
             db, profile, name, operator=user,
         )
-    finally:
-        db.close()
 
 
 # ===========================================================================
@@ -312,8 +286,7 @@ class RouteUpdateIn(BaseModel):
 
 @router.get("/profiles/{profile_id}/routes")
 def list_routes(profile_id: int, user: str = Depends(require_gateway_manage), paging: Page | None = Depends(optional_page)):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         profile = _profile_or_404(db, profile_id)
         if isinstance(paging, Page):
             out = list_page(db, "gateway-routes", paging, profile_id=profile_id)
@@ -336,8 +309,6 @@ def list_routes(profile_id: int, user: str = Depends(require_gateway_manage), pa
         except errors.EAgentError as exc:
             out["liveError"] = exc.message
         return out
-    finally:
-        db.close()
 
 
 @router.post("/profiles/{profile_id}/routes", status_code=201)
@@ -345,8 +316,7 @@ def create_route(
     profile_id: int, body: RouteIn,
     user: str = Depends(require_gateway_manage),
 ):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         profile = _profile_or_404(db, profile_id)
         _live_client(db, profile)
         return route_mod.create_route(
@@ -357,8 +327,6 @@ def create_route(
             retry_attempts=body.retryAttempts,
             consumer_names=body.consumers, operator=user,
         )
-    finally:
-        db.close()
 
 
 @router.put("/profiles/{profile_id}/routes/{name}")
@@ -366,8 +334,7 @@ def update_route(
     profile_id: int, name: str, body: RouteUpdateIn,
     user: str = Depends(require_gateway_manage),
 ):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         profile = _profile_or_404(db, profile_id)
         client = _live_client(db, profile)
         if body.consumers is not None:
@@ -385,21 +352,16 @@ def update_route(
             retry_attempts=body.retryAttempts, operator=user, client=client,
         )
         return out
-    finally:
-        db.close()
 
 
 @router.delete("/profiles/{profile_id}/routes/{name}")
 def delete_route(
     profile_id: int, name: str, user: str = Depends(require_gateway_manage),
 ):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         profile = _profile_or_404(db, profile_id)
         _live_client(db, profile)
         return route_mod.delete_route(db, profile, name, operator=user)
-    finally:
-        db.close()
 
 
 # ===========================================================================
@@ -416,8 +378,7 @@ def list_consumers(
     profile_id: int, user: str = Depends(require_gateway_manage),
     paging: Page | None = Depends(optional_page),
 ):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         profile = _profile_or_404(db, profile_id)
         if isinstance(paging, Page):
             out = list_page(db, "gateway-consumers", paging, profile_id=profile_id)
@@ -442,8 +403,6 @@ def list_consumers(
         except errors.EAgentError as exc:
             out["liveError"] = exc.message
         return out
-    finally:
-        db.close()
 
 
 @router.post("/profiles/{profile_id}/consumers", status_code=201)
@@ -451,16 +410,13 @@ def create_consumer(
     profile_id: int, body: ConsumerIn,
     user: str = Depends(require_gateway_manage),
 ):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         profile = _profile_or_404(db, profile_id)
         _live_client(db, profile)
         return consumer_mod.create_consumer(
             db, profile, name=body.name, credential=body.credential,
             route_names=body.routes, operator=user,
         )
-    finally:
-        db.close()
 
 
 @router.post("/profiles/{profile_id}/consumers/{name}/rotate")
@@ -468,29 +424,23 @@ def rotate_consumer(
     profile_id: int, name: str,
     user: str = Depends(require_gateway_manage),
 ):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         profile = _profile_or_404(db, profile_id)
         _live_client(db, profile)
         return consumer_mod.rotate_consumer(
             db, profile, name, operator=user,
             grace_seconds=config.settings.gateway_key_grace_seconds,
         )
-    finally:
-        db.close()
 
 
 @router.delete("/profiles/{profile_id}/consumers/{name}")
 def delete_consumer(
     profile_id: int, name: str, user: str = Depends(require_gateway_manage),
 ):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         profile = _profile_or_404(db, profile_id)
         _live_client(db, profile)
         return consumer_mod.delete_consumer(db, profile, name, operator=user)
-    finally:
-        db.close()
 
 
 # ===========================================================================
@@ -503,8 +453,7 @@ def list_audits(
     pageSize: int = Query(default=50, ge=1, le=200),
     user: str = Depends(require_gateway_manage),
 ):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         _profile_or_404(db, profile_id)
         rows, total = dao.list_audits(
             db, profile_id, resource_type=resourceType, result=result,
@@ -514,8 +463,6 @@ def list_audits(
             r["created_at"] = str(r["created_at"])
         return {"items": rows, "audits": rows, "page": page, "pageSize": pageSize,
                 "total": total}
-    finally:
-        db.close()
 
 
 @router.get("/profiles/{profile_id}/export")
@@ -523,14 +470,11 @@ def export_config(
     profile_id: int, include_secrets: bool = False,
     user: str = Depends(require_gateway_manage),
 ):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         profile = _profile_or_404(db, profile_id)
         return export_import.export_profile(
             db, profile, include_secrets=include_secrets,
         )
-    finally:
-        db.close()
 
 
 @router.post("/profiles/{profile_id}/import")
@@ -538,12 +482,9 @@ def import_config(
     profile_id: int, payload: dict,
     user: str = Depends(require_gateway_manage),
 ):
-    db = Database()
-    try:
+    with closing(Database()) as db:
         profile = _profile_or_404(db, profile_id)
         client = _live_client(db, profile)
         return export_import.import_profile(
             db, profile, payload, operator=user, client=client,
         )
-    finally:
-        db.close()

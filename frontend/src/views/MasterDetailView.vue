@@ -1,11 +1,12 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { api } from '../api.js'
+import { fmtDateTime } from '../format.js'
 import { getSession } from '../auth.js'
 import { success } from '../notify.js'
 import { confirmAction } from '../ui.js'
 import RunResultPanel from '../components/RunResultPanel.vue'
-import { statusDisplayName, toolTrailText } from '../tool-display.js'
+import RunHistoryGroups from '../components/RunHistoryGroups.vue'
 import { sendA2aMessage, cancelA2aTask, reconnectA2aTask } from '../a2a-client.js'
 import { parseReactConfig, reactConfigRequest } from '../react-config.js'
 
@@ -69,19 +70,13 @@ const RUN_SOURCES = [
   ['testrun', '管理台试运行'], ['perf', '性能测试'],
 ]
 
-// 试运行（单点调用）：在管理台里直接对这个 Team 发一句话，走的是和
-// /a2a/{slug}/ 完全相同的 run_master，只是省掉 A2A 协议外壳。
+// 管理台试运行通过该 Team 的 A2A 端点发送消息。
 const trText = ref('')
-const trAsUser = ref('')      // 空 = 用当前登录工号
 const trContextId = ref('')   // 空 = 每次新开上下文；有值 = 接着上一轮追问
-const trFraming = ref(false)  // 是否复现 A2A 入站「不可信远端」framing
 const trResult = ref(null)
 const trErr = ref('')
-// 非流式 A2A 1.0，服务端返回完整 Task。
-// （这正是 A2A 真实调用方会经历的），所以 framing 开关只对回退路径生效。
+// 按服务传入额外业务参数。
 const trServices = ref('{}')
-const trLive = ref([])        // [{at: 秒, kind, label}] 实时进度条目
-const trLiveActive = ref(false)
 // 历史来自服务端 run_record（不是浏览器本地缓存）：切走页面、换台机器再进来
 // 都还在。后端按 context_id 前缀过滤，只取试运行自己那批。
 const trHistory = ref([])
@@ -188,8 +183,6 @@ const runToolLabels = computed(() => {
   }
   return labels
 })
-const formatToolTrail = names => toolTrailText(names || [], runToolLabels.value) || '—'
-const formatStatus = status => statusDisplayName(status)
 function openTrace(traceId) {
   const labels = {
     testrun: '返回试运行',
@@ -356,19 +349,7 @@ async function loadTestRunHistory() {
   // 要接着聊就点历史行上的「以此继续」，是显式动作。
 }
 
-/** SSE 流式试运行：真实 message/stream，事件逐条进「实时进度」。 */
-const LIVE_KIND = {
-  status: ['badge badge-gray', '状态'],
-  tool: ['badge badge-ok', '工具'],
-  art: ['badge badge-brand', '回答'],
-  ask: ['badge badge-warn', '追问'],
-  done: ['badge badge-ok', '完成'],
-  err: ['badge badge-err', '失败'],
-  warn: ['badge badge-warn', '注意'],
-}
-const liveBadge = (k) => (LIVE_KIND[k] || LIVE_KIND.status)[0]
-const liveKindLabel = (k) => (LIVE_KIND[k] || LIVE_KIND.status)[1]
-
+/** SSE 试运行：通过 A2A 客户端逐条更新结果面板。 */
 async function testRun() {
   if (!trText.value.trim() || saving.value === 'testrun') return
   saving.value = 'testrun'
@@ -390,7 +371,7 @@ async function testRun() {
       catch (reconnectError) { trErr.value = `${e.message}；重连失败：${reconnectError.message}` }
     } else trErr.value = e.message
   }
-  finally { saving.value = ''; trLiveActive.value = false }
+  finally { saving.value = '' }
 }
 async function stopTestRun() {
   if (!trResult.value?.taskId) return
@@ -426,13 +407,6 @@ const runEntries = computed(() => runs.value.map(row => ({
 })))
 const runGroups = computed(() => groupByContext(runEntries.value))
 
-/** 一条记录的来源，只用于打标签（判定口径与后端 source 过滤一致）。 */
-function runSourceLabel(contextId) {
-  if (String(contextId).startsWith('testrun-')) return '试运行'
-  if (String(contextId).startsWith('perf-')) return '性能测试'
-  return 'A2A'
-}
-
 // 「加入测试集」联动：在运行监控里发现一条路由错了，直接把它加进评测集，
 // 不必回到提示词调优页按"最近 N 条"整批抓——那样会连带抓进一堆无关记录。
 const evalDatasets = ref([])
@@ -453,7 +427,7 @@ async function addRunToDataset(runId) {
     : '这条运行记录已经在该测试集里了')
 }
 
-/** 拉运行记录。append=true 时接着往后翻页。 */
+/** 按当前分页与筛选条件拉取运行记录。 */
 async function loadRuns() { await runsPager.load() }
 
 /** 换筛选条件时回到第一页。 */
@@ -553,13 +527,6 @@ function newTestContext() {
   trErr.value = ''
 }
 
-const trStatusClass = (st) => ({
-  SUCCEEDED: 'badge badge-ok', FAILED: 'badge badge-err',
-  LIMIT_REACHED: 'badge badge-warn', REJECTED: 'badge badge-warn',
-  CANCELED: 'badge badge-gray',
-}[st] || 'badge badge-gray')
-
-const fmtTime = (t) => (t || '').replace('T', ' ').slice(0, 19)
 </script>
 
 <template>
@@ -703,7 +670,7 @@ const fmtTime = (t) => (t || '').replace('T', ' ').slice(0, 19)
               <td><span :class="{'PUBLISHED':'badge badge-ok','DRAFT':'badge badge-warn','SUPERSEDED':'badge badge-gray'}[p.status]">{{ p.status }}</span></td>
               <td class="mono">{{ p.source }}</td>
               <td class="mono">{{ p.created_by }}</td>
-              <td class="mono">{{ fmtTime(p.created_at) }}</td>
+              <td class="mono">{{ fmtDateTime(p.created_at, '') }}</td>
               <td>
                 <button v-if="canManage && p.status!=='PUBLISHED'" class="btn btn-text"
                         :disabled="saving === `publish:${p.prompt_version_id}`"
@@ -863,47 +830,20 @@ const fmtTime = (t) => (t || '').replace('T', ' ').slice(0, 19)
           点任意一行展开/收起当时的完整结果。
         </p>
 
-        <div v-for="g in trGroups" :key="g.contextId"
-          class="border border-line rounded-lg mb-3 last:mb-0 overflow-hidden">
-          <div class="flex items-center gap-2 flex-wrap px-3 py-2 bg-canvas">
-            <span class="text-[13px] font-medium">
-              {{ g.turns.length > 1 ? `${g.turns.length} 轮对话` : '单轮' }}
-            </span>
-            <span class="mono text-[12px] text-t3" :title="g.contextId">{{ g.contextId }}</span>
-            <span class="mono text-[12px] text-t3">{{ fmtTime(g.latestAt) || '刚刚' }}</span>
+        <RunHistoryGroups :groups="trGroups" :selected-run="trResult" :tool-labels="runToolLabels"
+          @select="showHistory">
+          <template #group-actions="{ group }">
             <button class="btn btn-text ml-auto"
-              :class="trContextId === g.contextId ? 'font-semibold' : ''"
-              @click="resumeContext(g)">
-              {{ trContextId === g.contextId ? '✓ 当前上下文' : '接着这段问' }}
+              :class="trContextId === group.contextId ? 'font-semibold' : ''"
+              @click="resumeContext(group)">
+              {{ trContextId === group.contextId ? '✓ 当前上下文' : '接着这段问' }}
             </button>
             <button v-if="canManage" class="btn btn-text text-t3 hover:text-brand"
-              :disabled="saving === `delrun:${g.contextId}`"
-              :title="`删除整段对话（当前页显示 ${g.turns.length} 条，含其他页记录）`"
-              @click="deleteContext(g)">删除</button>
-          </div>
-          <table class="tbl">
-            <tbody>
-              <tr v-for="(h, i) in g.turns" :key="h.r.runId || i"
-                class="cursor-pointer"
-                :class="trResult && trResult.runId === h.r.runId ? 'bg-canvas' : ''"
-                @click="showHistory(h)">
-                <td class="w-8 mono text-[12px] text-t3">{{ i + 1 }}</td>
-                <td class="max-w-md truncate" :title="h.q">{{ h.q }}</td>
-                <td class="w-28">
-                  <span :class="trStatusClass(h.r.status)" :title="h.r.status">{{ formatStatus(h.r.status) }}</span>
-                  <span v-if="h.r.inputRequired" class="badge badge-warn ml-1.5">追问</span>
-                </td>
-                <td class="text-[12px] max-w-xl truncate" :title="formatToolTrail(h.r.routedServices)">
-                  {{ formatToolTrail(h.r.routedServices) }}
-                </td>
-                <td class="mono text-[12px] w-24">
-                  {{ h.r.elapsedMs == null ? '—' : h.r.elapsedMs + ' ms' }}
-                </td>
-                <td class="mono text-[12px] text-t3 w-20">{{ (fmtTime(h.r.startedAt) || '刚刚').slice(11) || '刚刚' }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+              :disabled="saving === `delrun:${group.contextId}`"
+              :title="`删除整段对话（当前页显示 ${group.turns.length} 条，含其他页记录）`"
+              @click="deleteContext(group)">删除</button>
+          </template>
+        </RunHistoryGroups>
         <Pagination :pager="historyPager" />
         <p class="text-xs text-t3">按运行记录分页，同一上下文可能跨页展示。</p>
       </div>
@@ -962,49 +902,14 @@ const fmtTime = (t) => (t || '').replace('T', ' ').slice(0, 19)
       </div>
 
       <div v-else class="card">
-        <div v-for="g in runGroups" :key="g.contextId"
-          class="border border-line rounded-lg mb-3 last:mb-0 overflow-hidden">
-          <div class="flex items-center gap-2 flex-wrap px-3 py-2 bg-canvas">
-            <span class="badge badge-gray">{{ runSourceLabel(g.contextId) }}</span>
-            <span class="text-[13px] font-medium">
-              {{ g.turns.length > 1 ? `${g.turns.length} 轮对话` : '单轮' }}
-            </span>
-            <span class="mono text-[12px] text-t3" :title="g.contextId">{{ g.contextId }}</span>
-            <span class="mono text-[12px] text-t3 ml-auto">{{ fmtTime(g.latestAt) }}</span>
-          </div>
-          <!-- 列多、屏窄时横向滚动：加了「加入测试集」这一列后表宽会超出卡片，
-               外层 overflow-hidden 会把末尾几列直接裁掉（时间和操作都点不到）。 -->
-          <div class="overflow-x-auto">
-          <table class="tbl">
-            <tbody>
-              <tr v-for="(h, i) in g.turns" :key="h.r.runId"
-                class="cursor-pointer"
-                :class="runResult && runResult.runId === h.r.runId ? 'bg-canvas' : ''"
-                @click="showRun(h)">
-                <td class="w-8 mono text-[12px] text-t3">{{ i + 1 }}</td>
-                <td class="max-w-md truncate" :title="h.q">{{ h.q }}</td>
-                <td class="w-28">
-                  <span :class="trStatusClass(h.r.status)" :title="h.r.status">{{ formatStatus(h.r.status) }}</span>
-                </td>
-                <td class="w-40 mono text-[12px] text-brand">{{ h.r.errorCode || '' }}</td>
-                <td class="text-[12px] max-w-xl truncate" :title="formatToolTrail(h.r.routedServices)">
-                  {{ formatToolTrail(h.r.routedServices) }}
-                </td>
-                <td class="mono text-[12px] text-t2 w-28">{{ h.r.asUser }}</td>
-                <td class="mono text-[12px] w-24">
-                  {{ h.r.elapsedMs == null ? '—' : h.r.elapsedMs + ' ms' }}
-                </td>
-                <td class="mono text-[12px] text-t3 w-20">{{ (fmtTime(h.r.startedAt) || '').slice(11) }}</td>
-                <td class="w-16 whitespace-nowrap" @click.stop>
-                  <button v-if="canManage && canLoopManage" class="btn btn-text whitespace-nowrap" :disabled="!evalDatasetId"
-                    :title="evalDatasetId ? '把这条运行记录加进上方选中的测试集' : '先在提示词调优页建一个测试集'"
-                    @click="addRunToDataset(h.r.runId)">加入</button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-          </div>
-        </div>
+        <RunHistoryGroups mode="runs" :groups="runGroups" :selected-run="runResult" :tool-labels="runToolLabels"
+          @select="showRun">
+          <template #row-actions="{ entry }">
+            <button v-if="canManage && canLoopManage" class="btn btn-text whitespace-nowrap" :disabled="!evalDatasetId"
+              :title="evalDatasetId ? '把这条运行记录加进上方选中的测试集' : '先在提示词调优页建一个测试集'"
+              @click="addRunToDataset(entry.r.runId)">加入</button>
+          </template>
+        </RunHistoryGroups>
 
         <Pagination :pager="runsPager" />
         <p class="text-xs text-t3">按运行记录分页，同一上下文可能跨页展示。</p>

@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+from contextlib import closing
 import json
 import uuid
 
@@ -25,6 +26,7 @@ from ..permission import page_permissions
 from ..security import cap_directory, console_auth
 from .pagination import Page, optional_page
 from .list_pages import list_page
+from .serializers import _public_user
 
 router = APIRouter(prefix="/api/v1")
 
@@ -96,8 +98,7 @@ def _subject_exists(db: Database, subject_type: str, subject_id: str) -> bool:
 
 
 def _get_subject_page_permissions(subject_type: str, subject_id: str) -> dict:
-    db = Database()
-    try:
+    with closing(Database()) as db:
         if not _subject_exists(db, subject_type, subject_id):
             raise errors.NotFoundError("用户不存在" if subject_type == "USER" else "用户组不存在")
         return {
@@ -106,33 +107,29 @@ def _get_subject_page_permissions(subject_type: str, subject_id: str) -> dict:
                 db, subject_type, subject_id,
             ),
         }
-    finally:
-        db.close()
 
 
 def _put_subject_page_permissions(
     subject_type: str, subject_id: str, body: PagePermissionsIn, operator: str,
 ) -> dict:
-    db = Database()
-    try:
-        if not _subject_exists(db, subject_type, subject_id):
-            raise errors.NotFoundError("用户不存在" if subject_type == "USER" else "用户组不存在")
-        before = page_permissions.direct_permissions(db, subject_type, subject_id)
-        after = page_permissions.replace_permissions(
-            db, subject_type, subject_id,
-            [item.model_dump() for item in body.permissions],
-        )
-        _audit_page_permissions(
-            db, operator, subject_type, subject_id, before, after,
-        )
-        db.commit()
-        return {"subjectType": subject_type.lower(), "subjectId": subject_id,
-                "permissions": after}
-    except Exception:
-        db.rollback()
-        raise
-    finally:
-        db.close()
+    with closing(Database()) as db:
+        try:
+            if not _subject_exists(db, subject_type, subject_id):
+                raise errors.NotFoundError("用户不存在" if subject_type == "USER" else "用户组不存在")
+            before = page_permissions.direct_permissions(db, subject_type, subject_id)
+            after = page_permissions.replace_permissions(
+                db, subject_type, subject_id,
+                [item.model_dump() for item in body.permissions],
+            )
+            _audit_page_permissions(
+                db, operator, subject_type, subject_id, before, after,
+            )
+            db.commit()
+            return {"subjectType": subject_type.lower(), "subjectId": subject_id,
+                    "permissions": after}
+        except Exception:
+            db.rollback()
+            raise
 
 
 @router.get("/admin/users/{user_id}/page-permissions",
@@ -170,8 +167,7 @@ def my_page_permissions(
     me: tuple[str, bool] = Depends(require_console_user),
 ) -> dict:
     user_id, is_admin = me
-    db = Database()
-    try:
+    with closing(Database()) as db:
         grants = page_permissions.effective_permissions(
             db, user_id, is_admin=is_admin,
         )
@@ -179,16 +175,6 @@ def my_page_permissions(
             "userId": user_id, "isAdmin": is_admin,
             "permissions": list(grants.values()),
         }
-    finally:
-        db.close()
-
-
-def _roles_of(db: Database, user_id: str) -> list[str]:
-    return [
-        r["role"] for r in db.query_all(
-            "SELECT role FROM eag_user_role WHERE user_id=:u", {"u": user_id},
-        )
-    ]
 
 
 def _pluto_admin_access_token(db: Database, request: Request) -> str:
@@ -216,27 +202,8 @@ def _directory_access_token(request: Request) -> str:
     """数据库目录只依赖 require_admin；HTTP 目录继续要求 Pluto 管理员 token。"""
     if cap_directory.database_backend_enabled():
         return ""
-    db = Database()
-    try:
+    with closing(Database()) as db:
         return _pluto_admin_access_token(db, request)
-    finally:
-        db.close()
-
-
-def _public_user(row: dict, roles: list[str], visible_services: int = 0) -> dict:
-    return {
-        "userId": row["user_id"],
-        "displayName": row["display_name"] or row["user_id"],
-        "department": row["department"] or "",
-        "email": row["email"] or "",
-        "status": row["status"],
-        "roles": roles,
-        "isAdmin": console_auth.ROLE_ADMIN in roles,
-        "visibleServices": visible_services,
-        "profileSyncStatus": row.get("profile_sync_status") or "",
-        "createdAt": row.get("created_at"),
-        "lastLoginAt": row.get("last_login_at"),
-    }
 
 
 def _upsert_verified_user(db: Database, directory_user: dict) -> dict:
@@ -290,7 +257,7 @@ def _upsert_verified_user(db: Database, directory_user: dict) -> dict:
     )
     if user is None:
         raise errors.DependencyError("用户录入失败")
-    return _public_user(user, _roles_of(db, user_id))
+    return _public_user(user, console_auth.user_roles(db, user_id))
 
 
 @router.get("/admin/users", dependencies=[Depends(require_admin)])
@@ -298,8 +265,7 @@ def list_users(paging: Page | None = Depends(optional_page)) -> list[dict] | dic
     """登录过的用户列表（权限管理·用户 Tab）。
 
     合并角色与可见服务数；按创建时间倒序（最近接入的排前面）。"""
-    db = Database()
-    try:
+    with closing(Database()) as db:
         if isinstance(paging, Page):
             return list_page(db, "admin-users", paging)
         users = db.query_all(
@@ -335,15 +301,12 @@ def list_users(paging: Page | None = Depends(optional_page)) -> list[dict] | dic
             )
             for u in users
         ]
-    finally:
-        db.close()
 
 
 @router.get("/admin/users/{user_id}", dependencies=[Depends(require_admin)])
 def get_user(user_id: str) -> dict:
     """本地用户档案详情。"""
-    db = Database()
-    try:
+    with closing(Database()) as db:
         user = db.query_one(
             """
             SELECT user_id, display_name, department, email, status,
@@ -355,9 +318,7 @@ def get_user(user_id: str) -> dict:
         )
         if user is None:
             raise errors.NotFoundError("用户不存在")
-        return _public_user(user, _roles_of(db, user_id))
-    finally:
-        db.close()
+        return _public_user(user, console_auth.user_roles(db, user_id))
 
 
 class DirectorySearchIn(BaseModel):
@@ -399,16 +360,13 @@ async def create_user_from_directory(
     directory_user = await cap_directory.get_user(
         body.userId, pluto_access_token=access_token,
     )
-    db = Database()
-    try:
+    with closing(Database()) as db:
         user = _upsert_verified_user(db, directory_user)
         _audit(db, operator, "user.directory_import", user["userId"], {
             "by": operator, "source": "cap_pluto",
         })
         db.commit()
         return user
-    finally:
-        db.close()
 
 
 class RoleIn(BaseModel):
@@ -421,8 +379,7 @@ def set_user_role(user_id: str, body: RoleIn,
     """授予/回收管理员角色。eagent_user 基础角色始终保留。"""
     if user_id == "admin":
         raise errors.ValidationError("内置 admin 账号的角色不可修改")
-    db = Database()
-    try:
+    with closing(Database()) as db:
         user = db.query_one(
             "SELECT user_id FROM eag_console_user WHERE user_id=:u",
             {"u": user_id},
@@ -448,9 +405,7 @@ def set_user_role(user_id: str, body: RoleIn,
         _audit(db, operator, action, user_id, {"by": operator})
         db.commit()
         return {"userId": user_id, "isAdmin": body.isAdmin,
-                "roles": _roles_of(db, user_id)}
-    finally:
-        db.close()
+                "roles": console_auth.user_roles(db, user_id)}
 
 
 class StatusIn(BaseModel):
@@ -465,8 +420,7 @@ def set_user_status(user_id: str, body: StatusIn,
         raise errors.ValidationError("status 仅支持 active / disabled")
     if user_id == "admin":
         raise errors.ValidationError("内置 admin 账号不可禁用")
-    db = Database()
-    try:
+    with closing(Database()) as db:
         user = db.query_one(
             "SELECT user_id FROM eag_console_user WHERE user_id=:u",
             {"u": user_id},
@@ -485,16 +439,13 @@ def set_user_status(user_id: str, body: StatusIn,
         _audit(db, operator, f"user.{body.status}", user_id, {"by": operator})
         db.commit()
         return {"userId": user_id, "status": body.status}
-    finally:
-        db.close()
 
 
 @router.get("/admin/users/{user_id}/permissions",
             dependencies=[Depends(require_admin)])
 def user_permission_detail(user_id: str) -> dict:
     """某用户的权限明细（用户 Tab 行展开）：所属组（含各组服务）+ 直授。"""
-    db = Database()
-    try:
+    with closing(Database()) as db:
         user = db.query_one(
             "SELECT user_id FROM eag_console_user WHERE user_id=:u",
             {"u": user_id},
@@ -502,7 +453,7 @@ def user_permission_detail(user_id: str) -> dict:
         if user is None:
             raise errors.NotFoundError("用户不存在")
         from ..permission import service as perm_svc
-        roles = _roles_of(db, user_id)
+        roles = console_auth.user_roles(db, user_id)
         effective = page_permissions.effective_permissions(
             db, user_id,
             is_admin=console_auth.ROLE_ADMIN in roles,
@@ -515,8 +466,6 @@ def user_permission_detail(user_id: str) -> dict:
                 "effective": list(effective.values()),
             },
         }
-    finally:
-        db.close()
 
 
 @router.get("/me/permissions")
@@ -524,9 +473,8 @@ def my_permissions(me: tuple[str, bool] = Depends(require_console_user), paging:
     """我的权限（permission-control v1）：角色 + 可见服务（含来源）+
     管理员联系方式（线下申请渠道）。"""
     user_id, is_admin = me
-    db = Database()
-    try:
-        roles = _roles_of(db, user_id)
+    with closing(Database()) as db:
+        roles = console_auth.user_roles(db, user_id)
         if isinstance(paging, Page):
             result = list_page(db, "my-services", paging, user_id=user_id)
             return {**result, "services": result["items"], "userId": user_id, "roles": roles,
@@ -571,5 +519,3 @@ def my_permissions(me: tuple[str, bool] = Depends(require_console_user), paging:
             "services": unique,
             "adminContact": settings.admin_contact,
         }
-    finally:
-        db.close()
