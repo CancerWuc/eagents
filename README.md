@@ -32,8 +32,9 @@ docker compose --env-file backend/.env.local up -d --build
 Docker Compose 项目名为 `eagents-github`，容器为 `eagents-github-mysql`、
 `eagents-github-backend`、`eagents-github-frontend`；应用镜像为
 `eagents-github-backend:local`、`eagents-github-frontend:local` 和
-`eagents-github-mysql:5.7`，网络为 `eagents-github-network`。
-MySQL 镜像基于官方 `mysql:5.7` 构建，使用独立的 GitHub 镜像名。
+`eagents-github-mysql:8.0`，网络为 `eagents-github-network`。
+MySQL 镜像基于官方 `mysql:8.0` 构建（原生支持 arm64 与 amd64），使用独立的 GitHub 镜像名。
+代码按 MySQL 5.7 / OceanBase 兼容语法编写，已验证可在 8.0 上完成建表与全部迁移。
 数据卷为 `eagents-github-mysql-data`、`eagents-github-kb-data`，数据库与账号
 均为 `eagent_github`，与旧版独立。数据库表结构由后端首启自举并执行迁移，
 不挂载含固定旧库名的 `schema.sql` 到 MySQL 初始化目录。
